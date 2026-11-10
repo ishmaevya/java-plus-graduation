@@ -20,6 +20,3 @@ target/
 *.iws
 *.iml
 *.ipr
-
-ewm-main-service.json
-ewm_main_report.html
