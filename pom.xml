@@ -32,12 +32,19 @@
 		<checkstyle.version>10.3</checkstyle.version>
 		<spotbugs.maven.plugin.version>4.8.5.0</spotbugs.maven.plugin.version>
 		<jacoco.maven.plugin.version>0.8.12</jacoco.maven.plugin.version>
-		<spring-web.version>6.2.16</spring-web.version>
+		<spring-cloud.version>2023.0.3</spring-cloud.version>
 		<commons-collections4.version>4.5.0</commons-collections4.version>
 	</properties>
 
 	<dependencyManagement>
 		<dependencies>
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
 			<dependency>
 				<groupId>org.springdoc</groupId>
 				<artifactId>springdoc-openapi-ui</artifactId>

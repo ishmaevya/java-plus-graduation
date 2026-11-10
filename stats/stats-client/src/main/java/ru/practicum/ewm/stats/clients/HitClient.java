@@ -3,10 +3,12 @@ package ru.practicum.ewm.stats.clients;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
-import org.springframework.http.*;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.cloud.client.discovery.DiscoveryClient;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
-import org.springframework.web.util.DefaultUriBuilderFactory;
 import ru.practicum.ewm.stats.base.BaseClient;
 import ru.practicum.ewm.stats.dto.StatHitRequest;
 
@@ -16,13 +18,11 @@ import static ru.practicum.ewm.stats.base.ClientConstants.API_PREFIX_HIT;
 @Component
 public class HitClient extends BaseClient {
 
-    public HitClient(RestTemplateBuilder builder, @Value("${stats-server.url}") String serverUrl) {
-        super(
-                builder
-                        .uriTemplateHandler(new DefaultUriBuilderFactory(serverUrl))
-                        .requestFactory(() -> new JdkClientHttpRequestFactory())
-                        .build()
-        );
+    public HitClient(RestTemplateBuilder builder,
+                     DiscoveryClient discoveryClient,
+                     RetryTemplate retryTemplate,
+                     @Value("${stats-server.id:stats-server}") String serverId) {
+        super(builder, discoveryClient, retryTemplate, serverId);
     }
 
     public void saveHit(StatHitRequest request) {
@@ -31,6 +31,6 @@ public class HitClient extends BaseClient {
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<StatHitRequest> entity = new HttpEntity<>(request, headers);
 
-        rest.postForEntity(API_PREFIX_HIT, entity, Void.class);
+        execute(baseUrl -> rest.postForEntity(baseUrl + API_PREFIX_HIT, entity, Void.class));
     }
 }
