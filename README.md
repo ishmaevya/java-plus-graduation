@@ -4,9 +4,9 @@
 
 ## Текущий этап
 
-Этап 2: создан каркас микросервисов, перенесены домены пользователей и категорий в `core/user-service` и `core/category-service`. Остальная бизнес-логика по-прежнему находится в `core/main-service`; перенос domain-кода будет выполняться поэтапно.
+Этап 2: создан каркас микросервисов, перенесены домены пользователей, категорий и заявок на участие в `core/user-service`, `core/category-service` и `core/request-service`. Остальная бизнес-логика по-прежнему находится в `core/main-service`; перенос domain-кода будет выполняться поэтапно.
 
-`user-service` предоставляет публичный API `/admin/users` и внутренний API `/internal/users` для получения пользователя, краткой записи и пакетной выборки по идентификаторам. `category-service` предоставляет публичные API `/categories` и `/admin/categories`, а также внутренний API `/internal/categories`. Контракты Feign-клиентов находятся в `core/common`.
+`user-service` предоставляет публичный API `/admin/users` и внутренний API `/internal/users` для получения пользователя, краткой записи и пакетной выборки по идентификаторам. `category-service` предоставляет публичные API `/categories` и `/admin/categories`, а также внутренний API `/internal/categories`. `request-service` предоставляет публичные API `/users/{userId}/requests` и `/users/{userId}/events/{eventId}/requests`, а также внутренний API `/internal/requests` для получения заявки, пакетной выборки и количества подтверждённых заявок события. Контракты Feign-клиентов находятся в `core/common`; `request-service` получает пользователей и события через `UserClient` и `EventClient`.
 
 ## Модули
 
