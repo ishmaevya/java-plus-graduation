@@ -13,6 +13,17 @@
 
     <packaging>pom</packaging>
     <modules>
+        <module>common</module>
+        <module>service-parent</module>
+        <module>user-service</module>
+        <module>category-service</module>
+        <module>event-service</module>
+        <module>request-service</module>
+        <module>compilation-service</module>
+        <module>comment-service</module>
+        <module>rating-service</module>
+        <module>subscription-service</module>
+        <module>location-service</module>
         <module>main-service</module>
     </modules>
 

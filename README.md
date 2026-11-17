@@ -1,0 +1,46 @@
+# Explore With Me
+
+Проект переводится с монолита `core/main-service` на микросервисную архитектуру Spring Cloud.
+
+## Текущий этап
+
+Этап 2: создан каркас микросервисов, перенесён домен пользователей в `core/user-service`. Остальная бизнес-логика по-прежнему находится в `core/main-service`; перенос domain-кода будет выполняться поэтапно.
+
+`user-service` предоставляет публичный API `/admin/users` и внутренний API `/internal/users` для получения пользователя, краткой записи и пакетной выборки по идентификаторам. Контракт Feign-клиента находится в `core/common`.
+
+## Модули
+
+| Модуль | Назначение | База данных |
+| --- | --- | --- |
+| `core/user-service` | Пользователи | `ewm_user` |
+| `core/category-service` | Категории | `ewm_category` |
+| `core/event-service` | События | `ewm_event` |
+| `core/request-service` | Заявки на участие | `ewm_request` |
+| `core/compilation-service` | Подборки событий | `ewm_compilation` |
+| `core/comment-service` | Комментарии | `ewm_comment` |
+| `core/rating-service` | Рейтинги событий | `ewm_rating` |
+| `core/subscription-service` | Подписки | `ewm_subscription` |
+| `core/location-service` | Локации | `ewm_location` |
+
+Общие DTO и исключения находятся в `core/common`. Общие зависимости сервисов вынесены в `core/service-parent`.
+
+## Инфраструктура
+
+- `infra/discovery-server`: Eureka, порт `8761`.
+- `infra/config-server`: Config Server с native-профилем, конфигурации в `infra/config-server/src/main/resources/config`.
+- `infra/gateway-server`: Spring Cloud Gateway, порт `8080`.
+- `stats/stats-server`: сервис статистики, порт `9090`.
+
+Маршруты gateway направлены на сервисы через Eureka. Маршруты `/internal/**` наружу не публикуются.
+
+## Сборка
+
+```bash
+mvn clean package -DskipTests
+```
+
+## Запуск
+
+Инфраструктура и сервисы запускаются через Eureka и Config Server. Каждый прикладной сервис использует `spring.application.name`, совпадающее с именем его конфигурации в Config Server.
+
+Локальный запуск через Docker Compose и перевод `main-service` на новые сервисы будут добавлены на следующих этапах.
