@@ -4,9 +4,9 @@
 
 ## Текущий этап
 
-Этап 2: создан каркас микросервисов, перенесены домены пользователей, категорий и заявок на участие в `core/user-service`, `core/category-service` и `core/request-service`. Остальная бизнес-логика по-прежнему находится в `core/main-service`; перенос domain-кода будет выполняться поэтапно.
+Этап 2: создан каркас микросервисов, перенесены домены пользователей, категорий, заявок на участие и событий в `core/user-service`, `core/category-service`, `core/request-service` и `core/event-service`. Остальная бизнес-логика по-прежнему находится в `core/main-service`; перенос domain-кода будет выполняться поэтапно.
 
-`user-service` предоставляет публичный API `/admin/users` и внутренний API `/internal/users` для получения пользователя, краткой записи и пакетной выборки по идентификаторам. `category-service` предоставляет публичные API `/categories` и `/admin/categories`, а также внутренний API `/internal/categories`. `request-service` предоставляет публичные API `/users/{userId}/requests` и `/users/{userId}/events/{eventId}/requests`, а также внутренний API `/internal/requests` для получения заявки, пакетной выборки и количества подтверждённых заявок события. Контракты Feign-клиентов находятся в `core/common`; `request-service` получает пользователей и события через `UserClient` и `EventClient`.
+`user-service` предоставляет публичный API `/admin/users` и внутренний API `/internal/users` для получения пользователя, краткой записи и пакетной выборки по идентификаторам. `category-service` предоставляет публичные API `/categories` и `/admin/categories`, а также внутренний API `/internal/categories`. `request-service` предоставляет публичные API `/users/{userId}/requests` и `/users/{userId}/events/{eventId}/requests`, а также внутренний API `/internal/requests` для получения заявки, пакетной выборки и количества подтверждённых заявок события. `event-service` предоставляет публичные API `/events` и `/admin/events`, приватный API `/users/{userId}/events` и внутренний API `/internal/events`. Контракты Feign-клиентов находятся в `core/common`; сервисы получают связанные данные через `UserClient`, `CategoryClient`, `EventClient`, `RequestClient`, `RatingClient`, `CommentClient` и `SubscriptionClient`.
 
 ## Модули
 
