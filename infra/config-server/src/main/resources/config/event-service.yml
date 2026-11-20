@@ -1,14 +1,14 @@
 server:
-  port: 0
+  port: ${SERVER_PORT:0}
 
 stats-server:
   id: stats-server
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/ewm_event
-    username: ewm
-    password: ewm
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ewm_event}
+    username: ${SPRING_DATASOURCE_USERNAME:ewm}
+    password: ${SPRING_DATASOURCE_PASSWORD:ewm}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:

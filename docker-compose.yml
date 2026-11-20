@@ -1,70 +1,308 @@
-services:
-  stats-server:
-    build:
-      context: .
-      dockerfile: stats/stats-server/Dockerfile
-    image: stats-server
-    container_name: stats-server
-    ports:
-      - "9090:9090"
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://stats-db:5432/ewm-stats
-      - SPRING_DATASOURCE_USERNAME=ewm
-      - SPRING_DATASOURCE_PASSWORD=ewm
-    depends_on:
-      stats-db:
-        condition: service_healthy
+x-app-env: &app-env
+  EUREKA_URL: http://discovery-server:8761/eureka/
 
+x-java-healthcheck: &java-healthcheck
+  test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/$${SERVER_PORT}"]
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 1200s
+
+services:
   stats-db:
     image: postgres:16.1
     container_name: stats-db
     ports:
       - "6541:5432"
     environment:
-      - POSTGRES_PASSWORD=ewm
-      - POSTGRES_USER=ewm
-      - POSTGRES_DB=ewm-stats
+      POSTGRES_PASSWORD: ewm
+      POSTGRES_USER: ewm
+      POSTGRES_DB: ewm-stats
     volumes:
       - stats_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -q -d $$POSTGRES_DB -U $$POSTGRES_USER" ]
+      test: ["CMD-SHELL", "pg_isready -q -d $$POSTGRES_DB -U $$POSTGRES_USER"]
       timeout: 5s
       interval: 5s
       retries: 10
-
-  ewm-service:
-    build:
-      context: .
-      dockerfile: core/main-service/Dockerfile
-    image: ewm-service
-    container_name: ewm-service
-    ports:
-      - "8080:8080"
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://ewm-db:5432/ewm-main
-      - SPRING_DATASOURCE_USERNAME=ewm
-      - SPRING_DATASOURCE_PASSWORD=ewm
-      - STATS_SERVER_URL=http://stats-server:9090
-    depends_on:
-      ewm-db:
-        condition: service_healthy
 
   ewm-db:
     image: postgres:16.1
     container_name: ewm-db
     ports:
-      - "6542:5432"
+      - "6543:5432"
     environment:
-      - POSTGRES_PASSWORD=ewm
-      - POSTGRES_USER=ewm
-      - POSTGRES_DB=ewm-main
+      POSTGRES_PASSWORD: ewm
+      POSTGRES_USER: ewm
+      POSTGRES_DB: ewm_user
     volumes:
       - ewm_db_data:/var/lib/postgresql/data
+      - ./infra/postgres/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -q -d $$POSTGRES_DB -U $$POSTGRES_USER" ]
+      test: ["CMD-SHELL", "pg_isready -q -d $$POSTGRES_DB -U $$POSTGRES_USER"]
       timeout: 5s
       interval: 5s
       retries: 10
+
+  discovery-server:
+    build:
+      context: .
+      dockerfile: infra/discovery-server/Dockerfile
+    image: ewm-discovery-server
+    container_name: discovery-server
+    ports:
+      - "8761:8761"
+    healthcheck:
+      <<: *java-healthcheck
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8761"]
+
+  config-server:
+    build:
+      context: .
+      dockerfile: infra/config-server/Dockerfile
+    image: ewm-config-server
+    container_name: config-server
+    ports:
+      - "8888:8888"
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8888"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  stats-server:
+    build:
+      context: .
+      dockerfile: stats/stats-server/Dockerfile
+    image: ewm-stats-server
+    container_name: stats-server
+    ports:
+      - "9090:9090"
+    environment:
+      <<: *app-env
+      SERVER_PORT: "9090"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://stats-db:5432/ewm-stats
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      stats-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  gateway-server:
+    build:
+      context: .
+      dockerfile: infra/gateway-server/Dockerfile
+    image: ewm-gateway-server
+    container_name: gateway-server
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8080"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  user-service:
+    build:
+      context: .
+      dockerfile: core/user-service/Dockerfile
+    image: ewm-user-service
+    container_name: user-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8081"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_user
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  category-service:
+    build:
+      context: .
+      dockerfile: core/category-service/Dockerfile
+    image: ewm-category-service
+    container_name: category-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8082"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_category
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  request-service:
+    build:
+      context: .
+      dockerfile: core/request-service/Dockerfile
+    image: ewm-request-service
+    container_name: request-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8083"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_request
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  event-service:
+    build:
+      context: .
+      dockerfile: core/event-service/Dockerfile
+    image: ewm-event-service
+    container_name: event-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8084"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_event
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+      stats-server:
+        condition: service_started
+    healthcheck: *java-healthcheck
+
+  compilation-service:
+    build:
+      context: .
+      dockerfile: core/compilation-service/Dockerfile
+    image: ewm-compilation-service
+    container_name: compilation-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8085"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_compilation
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  comment-service:
+    build:
+      context: .
+      dockerfile: core/comment-service/Dockerfile
+    image: ewm-comment-service
+    container_name: comment-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8086"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_comment
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  rating-service:
+    build:
+      context: .
+      dockerfile: core/rating-service/Dockerfile
+    image: ewm-rating-service
+    container_name: rating-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8087"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_rating
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  subscription-service:
+    build:
+      context: .
+      dockerfile: core/subscription-service/Dockerfile
+    image: ewm-subscription-service
+    container_name: subscription-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8088"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_subscription
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  location-service:
+    build:
+      context: .
+      dockerfile: core/location-service/Dockerfile
+    image: ewm-location-service
+    container_name: location-service
+    environment:
+      <<: *app-env
+      SERVER_PORT: "8089"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://ewm-db:5432/ewm_location
+      SPRING_DATASOURCE_USERNAME: ewm
+      SPRING_DATASOURCE_PASSWORD: ewm
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      ewm-db:
+        condition: service_healthy
+    healthcheck: *java-healthcheck
 
 volumes:
   stats_db_data:

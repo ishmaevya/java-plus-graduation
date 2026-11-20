@@ -24,7 +24,6 @@
         <module>rating-service</module>
         <module>subscription-service</module>
         <module>location-service</module>
-        <module>main-service</module>
     </modules>
 
 </project>
