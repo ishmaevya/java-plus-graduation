@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import ru.practicum.ewm.common.dto.EventShortDto;
 import ru.practicum.ewm.common.dto.EventSnapshotDto;
@@ -28,5 +29,10 @@ public class EventInternalController {
     @PostMapping("/batch")
     public List<EventShortDto> getByIds(@RequestBody List<Long> ids) {
         return eventService.getByIds(ids);
+    }
+
+    @GetMapping("/count-by-category")
+    public long countByCategoryId(@RequestParam("categoryId") Long categoryId) {
+        return eventService.countByCategoryId(categoryId);
     }
 }

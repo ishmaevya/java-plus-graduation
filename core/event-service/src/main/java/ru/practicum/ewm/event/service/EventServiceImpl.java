@@ -268,6 +268,11 @@ public class EventServiceImpl implements EventService {
         return toShortDtos(ordered);
     }
 
+    @Override
+    public long countByCategoryId(Long categoryId) {
+        return eventRepository.countByCategoryId(categoryId);
+    }
+
     private boolean eventLimitReached(List<Event> events, EventShortDto dto) {
         return events.stream()
                 .filter(event -> event.getId().equals(dto.getId()))

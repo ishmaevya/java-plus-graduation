@@ -15,7 +15,9 @@ import ru.practicum.ewm.category.exception.CategoryNotFoundException;
 import ru.practicum.ewm.category.mapper.CategoryMapper;
 import ru.practicum.ewm.category.model.Category;
 import ru.practicum.ewm.category.repository.CategoryRepository;
+import ru.practicum.ewm.common.client.EventClient;
 import ru.practicum.ewm.common.dto.CategoryDto;
+import ru.practicum.ewm.common.exception.ConflictException;
 import ru.practicum.ewm.common.exception.ValidationException;
 
 import java.util.List;
@@ -24,6 +26,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,6 +35,9 @@ class CategoryServiceImplTest {
 
     @Mock
     private CategoryRepository categoryRepository;
+
+    @Mock
+    private EventClient eventClient;
 
     @Spy
     private CategoryMapper mapper = new CategoryMapper();
@@ -138,10 +144,21 @@ class CategoryServiceImplTest {
     void deleteRemovesExistingCategory() {
         Category category = category(1L, "Concerts");
         when(categoryRepository.findById(1L)).thenReturn(Optional.of(category));
+        when(eventClient.countByCategoryId(1L)).thenReturn(0L);
 
         service.delete(1L);
 
         verify(categoryRepository).delete(category);
+    }
+
+    @Test
+    void deleteThrowsConflictWhenCategoryHasEvents() {
+        Category category = category(1L, "Concerts");
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(category));
+        when(eventClient.countByCategoryId(1L)).thenReturn(1L);
+
+        assertThrows(ConflictException.class, () -> service.delete(1L));
+        verify(categoryRepository, never()).delete(any(Category.class));
     }
 
     private Category category(Long id, String name) {

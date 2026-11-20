@@ -33,4 +33,6 @@ public interface EventService {
     EventSnapshotDto getSnapshot(Long eventId);
 
     List<EventShortDto> getByIds(List<Long> ids);
+
+    long countByCategoryId(Long categoryId);
 }

@@ -12,7 +12,9 @@ import ru.practicum.ewm.category.exception.CategoryNotFoundException;
 import ru.practicum.ewm.category.mapper.CategoryMapper;
 import ru.practicum.ewm.category.model.Category;
 import ru.practicum.ewm.category.repository.CategoryRepository;
+import ru.practicum.ewm.common.client.EventClient;
 import ru.practicum.ewm.common.dto.CategoryDto;
+import ru.practicum.ewm.common.exception.ConflictException;
 import ru.practicum.ewm.common.exception.ValidationException;
 
 import java.util.List;
@@ -29,6 +31,7 @@ public class CategoryServiceImpl implements CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final CategoryMapper mapper;
+    private final EventClient eventClient;
 
     @Override
     @Transactional
@@ -73,6 +76,9 @@ public class CategoryServiceImpl implements CategoryService {
     public void delete(Long catId) {
         Category category = categoryRepository.findById(catId)
                 .orElseThrow(() -> new CategoryNotFoundException(catId));
+        if (eventClient.countByCategoryId(catId) > 0) {
+            throw new ConflictException("Category with ID = %d has linked events".formatted(catId));
+        }
         categoryRepository.delete(category);
         categoryRepository.flush();
         log.debug("Category deleted: {}", catId);
