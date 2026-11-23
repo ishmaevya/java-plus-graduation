@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import ru.practicum.ewm.common.dto.ParticipationRequestDto;
 
 import java.util.List;
+import java.util.Map;
 
 @FeignClient(name = "request-service")
 public interface RequestClient {
@@ -20,6 +21,9 @@ public interface RequestClient {
 
     @GetMapping("/internal/requests/event/{eventId}/confirmed-count")
     Long getConfirmedCount(@PathVariable("eventId") Long eventId);
+
+    @PostMapping("/internal/requests/confirmed-counts")
+    Map<Long, Long> getConfirmedCounts(@RequestBody List<Long> eventIds);
 
     @GetMapping("/internal/requests/event/{eventId}/confirmed")
     List<ParticipationRequestDto> getConfirmed(@PathVariable("eventId") Long eventId);

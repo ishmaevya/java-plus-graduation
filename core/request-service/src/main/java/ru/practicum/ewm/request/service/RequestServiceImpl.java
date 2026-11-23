@@ -2,8 +2,8 @@ package ru.practicum.ewm.request.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.common.client.EventClient;
 import ru.practicum.ewm.common.client.UserClient;
 import ru.practicum.ewm.common.dto.EventRequestStatusUpdateRequest;
@@ -11,6 +11,7 @@ import ru.practicum.ewm.common.dto.EventRequestStatusUpdateResult;
 import ru.practicum.ewm.common.dto.EventSnapshotDto;
 import ru.practicum.ewm.common.dto.ParticipationRequestDto;
 import ru.practicum.ewm.common.exception.ConflictException;
+import ru.practicum.ewm.common.transaction.TransactionRunner;
 import ru.practicum.ewm.request.exception.EventNotFoundException;
 import ru.practicum.ewm.request.exception.RequestNotFoundException;
 import ru.practicum.ewm.request.mapper.RequestMapper;
@@ -20,6 +21,7 @@ import ru.practicum.ewm.request.repository.ParticipationRequestRepository;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +31,6 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class RequestServiceImpl implements RequestService {
 
     private final ParticipationRequestRepository requestRepository;
@@ -37,8 +38,14 @@ public class RequestServiceImpl implements RequestService {
     private final EventClient eventClient;
     private final RequestMapper mapper;
 
+    private TransactionRunner transactionRunner = new TransactionRunner();
+
+    @Autowired
+    public void setTransactionRunner(TransactionRunner transactionRunner) {
+        this.transactionRunner = transactionRunner;
+    }
+
     @Override
-    @Transactional
     public ParticipationRequestDto create(Long userId, Long eventId) {
         userClient.getById(userId);
         EventSnapshotDto event = eventClient.getById(eventId);
@@ -49,28 +56,29 @@ public class RequestServiceImpl implements RequestService {
         if (!"PUBLISHED".equals(event.getState())) {
             throw new ConflictException("Cannot participate in unpublished event");
         }
-        if (requestRepository.existsByRequesterIdAndEventId(userId, eventId)) {
-            throw new ConflictException("Request already exists");
-        }
 
         boolean limitEnabled = isLimitEnabled(event.getParticipantLimit());
-        if (limitEnabled) {
-            long confirmed = requestRepository.countByEventIdAndStatus(eventId, RequestStatus.CONFIRMED);
-            if (confirmed >= event.getParticipantLimit()) {
-                throw new ConflictException("The participant limit has been reached");
-            }
-        }
-
         RequestStatus status = limitEnabled && Boolean.TRUE.equals(event.getRequestModeration())
                 ? RequestStatus.PENDING
                 : RequestStatus.CONFIRMED;
 
-        ParticipationRequest request = requestRepository.save(ParticipationRequest.builder()
-                .created(LocalDateTime.now())
-                .eventId(eventId)
-                .requesterId(userId)
-                .status(status)
-                .build());
+        ParticipationRequest request = transactionRunner.execute(() -> {
+            if (requestRepository.existsByRequesterIdAndEventId(userId, eventId)) {
+                throw new ConflictException("Request already exists");
+            }
+            if (limitEnabled) {
+                long confirmed = requestRepository.countByEventIdAndStatus(eventId, RequestStatus.CONFIRMED);
+                if (confirmed >= event.getParticipantLimit()) {
+                    throw new ConflictException("The participant limit has been reached");
+                }
+            }
+            return requestRepository.save(ParticipationRequest.builder()
+                    .created(LocalDateTime.now())
+                    .eventId(eventId)
+                    .requesterId(userId)
+                    .status(status)
+                    .build());
+        });
 
         log.debug("Request created: {} for event {}", request.getId(), eventId);
         return mapper.toDto(request);
@@ -85,18 +93,18 @@ public class RequestServiceImpl implements RequestService {
     }
 
     @Override
-    @Transactional
     public ParticipationRequestDto cancel(Long userId, Long requestId) {
-        ParticipationRequest request = requestRepository.findById(requestId)
-                .orElseThrow(() -> new RequestNotFoundException(requestId));
-
-        if (!request.getRequesterId().equals(userId)) {
-            throw new RequestNotFoundException(requestId);
-        }
-
-        request.setStatus(RequestStatus.CANCELED);
+        ParticipationRequest request = transactionRunner.execute(() -> {
+            ParticipationRequest existing = requestRepository.findById(requestId)
+                    .orElseThrow(() -> new RequestNotFoundException(requestId));
+            if (!existing.getRequesterId().equals(userId)) {
+                throw new RequestNotFoundException(requestId);
+            }
+            existing.setStatus(RequestStatus.CANCELED);
+            return requestRepository.save(existing);
+        });
         log.debug("Request canceled: {}", requestId);
-        return mapper.toDto(requestRepository.save(request));
+        return mapper.toDto(request);
     }
 
     @Override
@@ -111,7 +119,6 @@ public class RequestServiceImpl implements RequestService {
     }
 
     @Override
-    @Transactional
     public EventRequestStatusUpdateResult changeStatus(Long userId, Long eventId,
                                                         EventRequestStatusUpdateRequest request) {
         EventSnapshotDto event = eventClient.getById(eventId);
@@ -123,62 +130,64 @@ public class RequestServiceImpl implements RequestService {
             throw new ConflictException("Confirmation of requests is not required");
         }
 
-        long confirmed = requestRepository.countByEventIdAndStatus(eventId, RequestStatus.CONFIRMED);
-        long limit = event.getParticipantLimit();
-        List<Long> ids = request.getRequestIds();
+        return transactionRunner.execute(() -> {
+            long confirmed = requestRepository.countByEventIdAndStatus(eventId, RequestStatus.CONFIRMED);
+            long limit = event.getParticipantLimit();
+            List<Long> ids = request.getRequestIds();
 
-        List<ParticipationRequest> found = requestRepository.findAllById(ids);
-        if (found.size() != ids.size()) {
-            List<Long> missing = new ArrayList<>(ids);
-            missing.removeAll(found.stream().map(ParticipationRequest::getId).toList());
-            throw new RequestNotFoundException(missing);
-        }
-
-        Map<Long, ParticipationRequest> byId = found.stream()
-                .collect(Collectors.toMap(ParticipationRequest::getId, Function.identity()));
-
-        for (Long id : ids) {
-            ParticipationRequest participationRequest = byId.get(id);
-            if (participationRequest.getStatus() != RequestStatus.PENDING) {
-                throw new ConflictException("Request must have status PENDING");
+            List<ParticipationRequest> found = requestRepository.findAllById(ids);
+            if (found.size() != ids.size()) {
+                List<Long> missing = new ArrayList<>(ids);
+                missing.removeAll(found.stream().map(ParticipationRequest::getId).toList());
+                throw new RequestNotFoundException(missing);
             }
-        }
 
-        boolean approve = "CONFIRMED".equals(request.getStatus());
-        for (Long id : ids) {
-            ParticipationRequest participationRequest = byId.get(id);
-            if (approve && confirmed < limit) {
-                participationRequest.setStatus(RequestStatus.CONFIRMED);
-                confirmed++;
-            } else {
-                participationRequest.setStatus(RequestStatus.REJECTED);
+            Map<Long, ParticipationRequest> byId = found.stream()
+                    .collect(Collectors.toMap(ParticipationRequest::getId, Function.identity()));
+
+            for (Long id : ids) {
+                ParticipationRequest participationRequest = byId.get(id);
+                if (participationRequest.getStatus() != RequestStatus.PENDING) {
+                    throw new ConflictException("Request must have status PENDING");
+                }
             }
-        }
-        requestRepository.saveAll(byId.values());
 
-        List<ParticipationRequestDto> confirmedRequests = new ArrayList<>();
-        List<ParticipationRequestDto> rejectedRequests = new ArrayList<>();
-        for (Long id : ids) {
-            ParticipationRequest participationRequest = byId.get(id);
-            if (participationRequest.getStatus() == RequestStatus.CONFIRMED) {
-                confirmedRequests.add(mapper.toDto(participationRequest));
-            } else {
-                rejectedRequests.add(mapper.toDto(participationRequest));
+            boolean approve = "CONFIRMED".equals(request.getStatus());
+            for (Long id : ids) {
+                ParticipationRequest participationRequest = byId.get(id);
+                if (approve && confirmed < limit) {
+                    participationRequest.setStatus(RequestStatus.CONFIRMED);
+                    confirmed++;
+                } else {
+                    participationRequest.setStatus(RequestStatus.REJECTED);
+                }
             }
-        }
+            requestRepository.saveAll(byId.values());
 
-        if (confirmed >= limit) {
-            List<ParticipationRequest> pending = requestRepository.findByEventIdAndStatus(
-                    eventId, RequestStatus.PENDING);
-            pending.forEach(r -> r.setStatus(RequestStatus.REJECTED));
-            requestRepository.saveAll(pending);
-            pending.forEach(r -> rejectedRequests.add(mapper.toDto(r)));
-        }
+            List<ParticipationRequestDto> confirmedRequests = new ArrayList<>();
+            List<ParticipationRequestDto> rejectedRequests = new ArrayList<>();
+            for (Long id : ids) {
+                ParticipationRequest participationRequest = byId.get(id);
+                if (participationRequest.getStatus() == RequestStatus.CONFIRMED) {
+                    confirmedRequests.add(mapper.toDto(participationRequest));
+                } else {
+                    rejectedRequests.add(mapper.toDto(participationRequest));
+                }
+            }
 
-        return EventRequestStatusUpdateResult.builder()
-                .confirmedRequests(confirmedRequests)
-                .rejectedRequests(rejectedRequests)
-                .build();
+            if (confirmed >= limit) {
+                List<ParticipationRequest> pending = requestRepository.findByEventIdAndStatus(
+                        eventId, RequestStatus.PENDING);
+                pending.forEach(r -> r.setStatus(RequestStatus.REJECTED));
+                requestRepository.saveAll(pending);
+                pending.forEach(r -> rejectedRequests.add(mapper.toDto(r)));
+            }
+
+            return EventRequestStatusUpdateResult.builder()
+                    .confirmedRequests(confirmedRequests)
+                    .rejectedRequests(rejectedRequests)
+                    .build();
+        });
     }
 
     @Override
@@ -207,6 +216,21 @@ public class RequestServiceImpl implements RequestService {
     @Override
     public long getConfirmedCount(Long eventId) {
         return requestRepository.countByEventIdAndStatus(eventId, RequestStatus.CONFIRMED);
+    }
+
+    @Override
+    public Map<Long, Long> getConfirmedCounts(List<Long> eventIds) {
+        Map<Long, Long> counts = new HashMap<>();
+        if (eventIds.isEmpty()) {
+            return counts;
+        }
+        for (Long eventId : eventIds) {
+            counts.put(eventId, 0L);
+        }
+        for (Object[] row : requestRepository.countByEventIdsAndStatus(eventIds, RequestStatus.CONFIRMED)) {
+            counts.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+        }
+        return counts;
     }
 
     @Override

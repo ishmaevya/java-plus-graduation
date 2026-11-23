@@ -11,6 +11,7 @@ import ru.practicum.ewm.common.dto.ParticipationRequestDto;
 import ru.practicum.ewm.request.service.RequestService;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/internal/requests")
@@ -32,6 +33,11 @@ public class RequestInternalController {
     @GetMapping("/event/{eventId}/confirmed-count")
     public Long getConfirmedCount(@PathVariable("eventId") Long eventId) {
         return requestService.getConfirmedCount(eventId);
+    }
+
+    @PostMapping("/confirmed-counts")
+    public Map<Long, Long> getConfirmedCounts(@RequestBody List<Long> eventIds) {
+        return requestService.getConfirmedCounts(eventIds);
     }
 
     @GetMapping("/event/{eventId}/confirmed")

@@ -27,7 +27,7 @@
 ## Инфраструктура
 
 - `infra/discovery-server`: Eureka, порт `8761`.
-- `infra/config-server`: Config Server с native-профилем, конфигурации в `infra/config-server/src/main/resources/config`.
+- `infra/config-server`: Config Server с native-профилем, конфигурации сгруппированы в `infra/config-server/src/main/resources/config` по каталогам `stats`, `core` и `infra`, внутри которых выделена папка на каждый сервис.
 - `infra/gateway-server`: Spring Cloud Gateway, порт `8080`.
 - `stats/stats-server`: сервис статистики, порт `9090`.
 

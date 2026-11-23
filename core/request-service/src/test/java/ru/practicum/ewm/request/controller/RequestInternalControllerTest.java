@@ -11,6 +11,7 @@ import ru.practicum.ewm.common.handler.ErrorHandler;
 import ru.practicum.ewm.request.service.RequestService;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -59,6 +60,19 @@ class RequestInternalControllerTest {
         mockMvc.perform(get("/internal/requests/event/10/confirmed-count"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").value(2));
+    }
+
+    @Test
+    void returnsConfirmedCounts() throws Exception {
+        when(requestService.getConfirmedCounts(List.of(10L, 11L)))
+                .thenReturn(Map.of(10L, 3L, 11L, 1L));
+
+        mockMvc.perform(post("/internal/requests/confirmed-counts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(List.of(10L, 11L))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$['10']").value(3))
+                .andExpect(jsonPath("$['11']").value(1));
     }
 
     @Test

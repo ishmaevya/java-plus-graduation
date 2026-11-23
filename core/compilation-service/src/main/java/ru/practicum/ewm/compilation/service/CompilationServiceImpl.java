@@ -2,14 +2,15 @@ package ru.practicum.ewm.compilation.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.common.client.EventClient;
 import ru.practicum.ewm.common.dto.CompilationDto;
 import ru.practicum.ewm.common.dto.EventShortDto;
 import ru.practicum.ewm.common.dto.NewCompilationDto;
 import ru.practicum.ewm.common.dto.UpdateCompilationRequest;
+import ru.practicum.ewm.common.transaction.TransactionRunner;
 import ru.practicum.ewm.compilation.exception.CompilationNotFoundException;
 import ru.practicum.ewm.compilation.model.Compilation;
 import ru.practicum.ewm.compilation.model.CompilationEvent;
@@ -28,58 +29,72 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class CompilationServiceImpl implements CompilationService {
 
     private final CompilationRepository compilationRepository;
     private final CompilationEventRepository compilationEventRepository;
     private final EventClient eventClient;
 
-    @Override
-    @Transactional
-    public CompilationDto create(NewCompilationDto dto) {
-        Compilation compilation = compilationRepository.save(Compilation.builder()
-                .title(dto.getTitle())
-                .pinned(dto.getPinned() != null ? dto.getPinned() : false)
-                .build());
+    private TransactionRunner transactionRunner = new TransactionRunner();
 
+    @Autowired
+    public void setTransactionRunner(TransactionRunner transactionRunner) {
+        this.transactionRunner = transactionRunner;
+    }
+
+    @Override
+    public CompilationDto create(NewCompilationDto dto) {
         List<Long> eventIds = dto.getEvents() == null
                 ? Collections.emptyList()
                 : new ArrayList<>(new LinkedHashSet<>(dto.getEvents()));
-        saveCompilationEvents(compilation.getId(), eventIds);
+        Map<Long, EventShortDto> events = resolveEvents(eventIds);
+
+        Compilation compilation = transactionRunner.execute(() -> {
+            Compilation saved = compilationRepository.save(Compilation.builder()
+                    .title(dto.getTitle())
+                    .pinned(dto.getPinned() != null ? dto.getPinned() : false)
+                    .build());
+            saveCompilationEvents(saved.getId(), eventIds, events);
+            return saved;
+        });
 
         log.debug("Compilation created: {}", compilation.getId());
-        return toDto(compilation, resolveEvents(eventIds));
+        return toDto(compilation, events);
     }
 
     @Override
-    @Transactional
     public CompilationDto patch(Long compId, UpdateCompilationRequest dto) {
-        Compilation compilation = findCompilation(compId);
+        Compilation existing = findCompilation(compId);
+        List<Long> eventIds = dto.getEvents() != null
+                ? new ArrayList<>(new LinkedHashSet<>(dto.getEvents()))
+                : getEventIds(compId);
+        Map<Long, EventShortDto> events = resolveEvents(eventIds);
 
-        if (dto.getEvents() != null) {
-            List<Long> eventIds = new ArrayList<>(new LinkedHashSet<>(dto.getEvents()));
-            compilationEventRepository.deleteAllByCompilationId(compId);
-            saveCompilationEvents(compId, eventIds);
-        }
-        if (dto.getPinned() != null) {
-            compilation.setPinned(dto.getPinned());
-        }
-        if (dto.getTitle() != null && !dto.getTitle().trim().isEmpty()) {
-            compilation.setTitle(dto.getTitle());
-        }
+        Compilation compilation = transactionRunner.execute(() -> {
+            if (dto.getEvents() != null) {
+                compilationEventRepository.deleteAllByCompilationId(compId);
+                saveCompilationEvents(compId, eventIds, events);
+            }
+            if (dto.getPinned() != null) {
+                existing.setPinned(dto.getPinned());
+            }
+            if (dto.getTitle() != null && !dto.getTitle().trim().isEmpty()) {
+                existing.setTitle(dto.getTitle());
+            }
+            return compilationRepository.save(existing);
+        });
 
-        compilation = compilationRepository.save(compilation);
         log.debug("Compilation patched: {}", compId);
-        return toDto(compilation, resolveEvents(getEventIds(compId)));
+        return toDto(compilation, events);
     }
 
     @Override
-    @Transactional
     public void delete(Long compId) {
-        Compilation compilation = findCompilation(compId);
-        compilationEventRepository.deleteAllByCompilationId(compId);
-        compilationRepository.delete(compilation);
+        transactionRunner.execute(() -> {
+            Compilation compilation = findCompilation(compId);
+            compilationEventRepository.deleteAllByCompilationId(compId);
+            compilationRepository.delete(compilation);
+        });
         log.debug("Compilation deleted: {}", compId);
     }
 
@@ -116,9 +131,11 @@ public class CompilationServiceImpl implements CompilationService {
                 .orElseThrow(() -> new CompilationNotFoundException(compId));
     }
 
-    private void saveCompilationEvents(Long compilationId, Collection<Long> eventIds) {
-        List<EventShortDto> events = resolveEvents(eventIds).values().stream().toList();
-        compilationEventRepository.saveAll(events.stream()
+    private void saveCompilationEvents(Long compilationId, Collection<Long> eventIds,
+                                       Map<Long, EventShortDto> resolvedEvents) {
+        compilationEventRepository.saveAll(eventIds.stream()
+                .map(resolvedEvents::get)
+                .filter(event -> event != null)
                 .map(event -> CompilationEvent.builder()
                         .compilationId(compilationId)
                         .eventId(event.getId())

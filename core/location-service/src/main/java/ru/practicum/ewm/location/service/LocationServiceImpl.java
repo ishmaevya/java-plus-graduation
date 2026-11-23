@@ -2,15 +2,16 @@ package ru.practicum.ewm.location.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.common.client.EventClient;
 import ru.practicum.ewm.common.dto.EventShortDto;
 import ru.practicum.ewm.common.dto.LocationDtoResponse;
 import ru.practicum.ewm.common.dto.LocationSearchRequest;
 import ru.practicum.ewm.common.dto.NewLocationDto;
 import ru.practicum.ewm.common.dto.UpdateLocationRequest;
+import ru.practicum.ewm.common.transaction.TransactionRunner;
 import ru.practicum.ewm.location.exception.LocationNotFoundException;
 import ru.practicum.ewm.location.mapper.LocationMapper;
 import ru.practicum.ewm.location.model.Location;
@@ -23,40 +24,47 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class LocationServiceImpl implements LocationService {
 
     private final LocationRepository locationRepository;
     private final LocationMapper mapper;
     private final EventClient eventClient;
 
+    private TransactionRunner transactionRunner = new TransactionRunner();
+
+    @Autowired
+    public void setTransactionRunner(TransactionRunner transactionRunner) {
+        this.transactionRunner = transactionRunner;
+    }
+
     @Override
-    @Transactional
     public LocationDtoResponse create(NewLocationDto dto) {
         eventClient.getById(dto.getEventId());
-        Location location = locationRepository.save(mapper.toModel(dto));
+        Location location = transactionRunner.execute(() -> locationRepository.save(mapper.toModel(dto)));
         log.debug("Location created: {}", location.getId());
         return mapper.toDto(location);
     }
 
     @Override
-    @Transactional
     public LocationDtoResponse patch(Long locId, UpdateLocationRequest dto) {
-        Location location = findLocation(locId);
         if (dto.getEventId() != null) {
             eventClient.getById(dto.getEventId());
         }
-        mapper.update(dto, location);
-        location = locationRepository.save(location);
+        Location location = transactionRunner.execute(() -> {
+            Location existing = findLocation(locId);
+            mapper.update(dto, existing);
+            return locationRepository.save(existing);
+        });
         log.debug("Location patched: {}", locId);
         return mapper.toDto(location);
     }
 
     @Override
-    @Transactional
     public void delete(Long locId) {
-        Location location = findLocation(locId);
-        locationRepository.delete(location);
+        transactionRunner.execute(() -> {
+            Location location = findLocation(locId);
+            locationRepository.delete(location);
+        });
         log.debug("Location deleted: {}", locId);
     }
 

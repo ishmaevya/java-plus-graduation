@@ -31,6 +31,7 @@ import ru.practicum.ewm.event.model.Location;
 import ru.practicum.ewm.event.repository.EventRepository;
 import ru.practicum.ewm.event.repository.EventSpecification;
 import ru.practicum.ewm.stats.clients.StatsClient;
+import ru.practicum.ewm.stats.dto.StatHitResponseElement;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -41,8 +42,10 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -177,17 +180,22 @@ class EventServiceImplTest {
         when(userClient.getByIds(anyList())).thenReturn(List.of(user()));
         when(ratingClient.getStatsBatch(anyList())).thenReturn(Map.of());
         when(commentClient.getCounts(anyList())).thenReturn(Map.of());
-        when(requestClient.getConfirmedCount(anyLong())).thenReturn(0L);
+        when(requestClient.getConfirmedCounts(anyList())).thenReturn(Map.of());
+        when(statsClient.getStats(any(), any(), anyList(), anyBoolean())).thenReturn(List.of(
+                new StatHitResponseElement("ewm-main-service", "/events/200", 5L)));
 
         List<EventShortDto> result = service.getByIds(List.of(200L, 100L));
 
         assertEquals(List.of(200L, 100L), result.stream().map(EventShortDto::getId).toList());
+        assertEquals(5L, result.getFirst().getViews());
+        verify(statsClient, times(1)).getStats(any(), any(), anyList(), anyBoolean());
+        verify(requestClient, times(1)).getConfirmedCounts(anyList());
     }
 
     private void stubCounters(Long eventId) {
-        when(requestClient.getConfirmedCount(eventId)).thenReturn(0L);
-        when(ratingClient.getStats(eventId)).thenReturn(RatingStatsDto.EMPTY);
-        when(commentClient.getCount(eventId)).thenReturn(0L);
+        when(requestClient.getConfirmedCounts(List.of(eventId))).thenReturn(Map.of(eventId, 0L));
+        when(ratingClient.getStatsBatch(List.of(eventId))).thenReturn(Map.of(eventId, RatingStatsDto.EMPTY));
+        when(commentClient.getCounts(List.of(eventId))).thenReturn(Map.of(eventId, 0L));
     }
 
     private NewEventDto newEvent() {

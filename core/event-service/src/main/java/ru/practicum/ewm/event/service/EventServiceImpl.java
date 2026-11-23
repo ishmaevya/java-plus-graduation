@@ -2,9 +2,9 @@ package ru.practicum.ewm.event.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.common.client.CategoryClient;
 import ru.practicum.ewm.common.client.CommentClient;
 import ru.practicum.ewm.common.client.RatingClient;
@@ -23,6 +23,7 @@ import ru.practicum.ewm.common.dto.UserDto;
 import ru.practicum.ewm.common.dto.UserShortDto;
 import ru.practicum.ewm.common.exception.ConflictException;
 import ru.practicum.ewm.common.exception.ValidationException;
+import ru.practicum.ewm.common.transaction.TransactionRunner;
 import ru.practicum.ewm.event.exception.CategoryNotFoundException;
 import ru.practicum.ewm.event.exception.EventNotFoundException;
 import ru.practicum.ewm.event.exception.UserNotFoundException;
@@ -32,21 +33,24 @@ import ru.practicum.ewm.event.model.EventState;
 import ru.practicum.ewm.event.repository.EventRepository;
 import ru.practicum.ewm.event.repository.EventSpecification;
 import ru.practicum.ewm.stats.clients.StatsClient;
+import ru.practicum.ewm.stats.dto.StatHitResponseElement;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class EventServiceImpl implements EventService {
 
     private static final String PUBLISH_EVENT = "PUBLISH_EVENT";
@@ -64,14 +68,21 @@ public class EventServiceImpl implements EventService {
     private final SubscriptionClient subscriptionClient;
     private final StatsClient statsClient;
 
+    private TransactionRunner transactionRunner = new TransactionRunner();
+
+    @Autowired
+    public void setTransactionRunner(TransactionRunner transactionRunner) {
+        this.transactionRunner = transactionRunner;
+    }
+
     @Override
-    @Transactional
     public EventFullDto create(Long userId, NewEventDto dto) {
         UserDto initiator = userClient.getById(userId);
         CategoryDto category = getCategory(dto.getCategory());
         validateEventDate(dto.getEventDate(), 2);
 
-        Event event = eventRepository.save(mapper.toEvent(dto, category.getId(), initiator.getId()));
+        Event event = transactionRunner.execute(() ->
+                eventRepository.save(mapper.toEvent(dto, category.getId(), initiator.getId())));
         log.debug("Event created: {}", event.getId());
         return toFullDto(event, category, toShort(initiator));
     }
@@ -96,9 +107,8 @@ public class EventServiceImpl implements EventService {
     }
 
     @Override
-    @Transactional
     public EventFullDto updateByUser(Long userId, Long eventId, UpdateEventUserRequest dto) {
-        userClient.getById(userId);
+        UserDto initiator = userClient.getById(userId);
         Event event = findEvent(eventId);
         if (!event.getInitiatorId().equals(userId)) {
             throw new EventNotFoundException(eventId);
@@ -120,9 +130,9 @@ public class EventServiceImpl implements EventService {
             }
         }
 
-        eventRepository.save(event);
-        return toFullDto(event, category != null ? category : getCategory(event.getCategoryId()),
-                toShort(userClient.getById(userId)));
+        Event saved = transactionRunner.execute(() -> eventRepository.save(event));
+        return toFullDto(saved, category != null ? category : getCategory(saved.getCategoryId()),
+                toShort(initiator));
     }
 
     @Override
@@ -146,11 +156,10 @@ public class EventServiceImpl implements EventService {
                 eventSpecification.eventsByAdmin(users, parsedStates, categories, start, end),
                 PageRequest.of(from / size, size)
         ).getContent();
-        return events.stream().map(this::toFullDto).toList();
+        return toFullDtos(events);
     }
 
     @Override
-    @Transactional
     public EventFullDto updateByAdmin(Long eventId, UpdateEventAdminRequest dto) {
         Event event = findEvent(eventId);
         CategoryDto category = dto.getCategory() != null ? getCategory(dto.getCategory()) : null;
@@ -182,9 +191,9 @@ public class EventServiceImpl implements EventService {
             }
         }
 
-        eventRepository.save(event);
-        return toFullDto(event, category != null ? category : getCategory(event.getCategoryId()),
-                toShort(userClient.getById(event.getInitiatorId())));
+        Event saved = transactionRunner.execute(() -> eventRepository.save(event));
+        return toFullDto(saved, category != null ? category : getCategory(saved.getCategoryId()),
+                toShort(userClient.getById(saved.getInitiatorId())));
     }
 
     @Override
@@ -214,6 +223,7 @@ public class EventServiceImpl implements EventService {
             ).getContent();
         }
 
+        Set<Long> subscribedInitiators = getSubscribedInitiators(userId, events);
         List<EventShortDto> subscribed = new ArrayList<>();
         List<EventShortDto> other = new ArrayList<>();
         for (EventShortDto dto : toShortDtos(events)) {
@@ -221,7 +231,7 @@ public class EventServiceImpl implements EventService {
                     && eventLimitReached(events, dto)) {
                 continue;
             }
-            if (userId != null && isSubscribed(userId, dto.getInitiator().getId())) {
+            if (subscribedInitiators.contains(dto.getInitiator().getId())) {
                 subscribed.add(dto);
             } else {
                 other.add(dto);
@@ -298,6 +308,8 @@ public class EventServiceImpl implements EventService {
         Map<Long, UserShortDto> users = getUsers(events);
         Map<Long, RatingStatsDto> ratings = getRatings(ids);
         Map<Long, Long> commentCounts = getCommentCounts(ids);
+        Map<Long, Long> views = getViews(ids);
+        Map<Long, Long> confirmed = getConfirmed(ids);
 
         List<EventShortDto> result = new ArrayList<>();
         for (Event event : events) {
@@ -310,8 +322,8 @@ public class EventServiceImpl implements EventService {
                     event,
                     category,
                     initiator,
-                    getViews(event.getId()),
-                    getConfirmed(event.getId()),
+                    views.getOrDefault(event.getId(), 0L),
+                    confirmed.getOrDefault(event.getId(), 0L),
                     rating,
                     commentCounts.getOrDefault(event.getId(), 0L)
             ));
@@ -319,21 +331,41 @@ public class EventServiceImpl implements EventService {
         return result;
     }
 
-    private EventFullDto toFullDto(Event event) {
-        return toFullDto(event, getCategory(event.getCategoryId()),
-                toShort(userClient.getById(event.getInitiatorId())));
+    private List<EventFullDto> toFullDtos(List<Event> events) {
+        return toFullDtos(events, getCategories(events), getUsers(events));
+    }
+
+    private List<EventFullDto> toFullDtos(List<Event> events, Map<Long, CategoryDto> categories,
+                                          Map<Long, UserShortDto> users) {
+        List<Long> ids = events.stream().map(Event::getId).toList();
+        Map<Long, RatingStatsDto> ratings = getRatings(ids);
+        Map<Long, Long> commentCounts = getCommentCounts(ids);
+        Map<Long, Long> views = getViews(ids);
+        Map<Long, Long> confirmed = getConfirmed(ids);
+
+        List<EventFullDto> result = new ArrayList<>();
+        for (Event event : events) {
+            CategoryDto category = categories.getOrDefault(event.getCategoryId(),
+                    new CategoryDto(event.getCategoryId(), null));
+            UserShortDto initiator = users.getOrDefault(event.getInitiatorId(),
+                    new UserShortDto(event.getInitiatorId(), null));
+            RatingStatsDto rating = ratings.getOrDefault(event.getId(), RatingStatsDto.EMPTY);
+            result.add(mapper.toFullDto(
+                    event,
+                    category,
+                    initiator,
+                    views.getOrDefault(event.getId(), 0L),
+                    confirmed.getOrDefault(event.getId(), 0L),
+                    rating,
+                    commentCounts.getOrDefault(event.getId(), 0L)
+            ));
+        }
+        return result;
     }
 
     private EventFullDto toFullDto(Event event, CategoryDto category, UserShortDto initiator) {
-        return mapper.toFullDto(
-                event,
-                category,
-                initiator,
-                getViews(event.getId()),
-                getConfirmed(event.getId()),
-                getRating(event.getId()),
-                getCommentCount(event.getId())
-        );
+        return toFullDtos(List.of(event), Map.of(event.getCategoryId(), category),
+                Map.of(initiator.getId(), initiator)).getFirst();
     }
 
     private Event findEvent(Long eventId) {
@@ -415,61 +447,81 @@ public class EventServiceImpl implements EventService {
         }
     }
 
-    private Long getViews(Long eventId) {
+    private Map<Long, Long> getViews(List<Long> eventIds) {
+        Map<Long, Long> views = zeroCounts(eventIds);
+        if (eventIds.isEmpty()) {
+            return views;
+        }
         try {
+            List<String> uris = eventIds.stream().map(id -> "/events/" + id).toList();
             var stats = statsClient.getStats(
                     LocalDateTime.of(2020, 1, 1, 0, 0),
                     LocalDateTime.now(),
-                    List.of("/events/" + eventId),
+                    uris,
                     true
             );
-            return stats == null || stats.isEmpty() ? 0L : stats.getFirst().getHits();
+            if (stats == null) {
+                return views;
+            }
+            for (StatHitResponseElement element : stats) {
+                String uri = element.getUri();
+                if (uri == null || !uri.startsWith("/events/")) {
+                    continue;
+                }
+                String id = uri.substring("/events/".length());
+                if (!id.isEmpty() && id.chars().allMatch(Character::isDigit)) {
+                    views.put(Long.valueOf(id), element.getHits() == null ? 0L : element.getHits());
+                }
+            }
         } catch (Exception e) {
-            log.warn("Failed to get views for event {}: {}", eventId, e.getMessage());
-            return 0L;
+            log.warn("Failed to get views: {}", e.getMessage());
         }
+        return views;
     }
 
-    private Long getConfirmed(Long eventId) {
-        try {
-            Long count = requestClient.getConfirmedCount(eventId);
-            return count == null ? 0L : count;
-        } catch (Exception e) {
-            log.warn("Failed to get confirmed requests for event {}: {}", eventId, e.getMessage());
-            return 0L;
+    private Map<Long, Long> getConfirmed(List<Long> eventIds) {
+        Map<Long, Long> confirmed = zeroCounts(eventIds);
+        if (eventIds.isEmpty()) {
+            return confirmed;
         }
+        try {
+            Map<Long, Long> counts = requestClient.getConfirmedCounts(eventIds);
+            if (counts == null) {
+                return confirmed;
+            }
+            counts.forEach((eventId, count) -> confirmed.put(eventId, count == null ? 0L : count));
+        } catch (Exception e) {
+            log.warn("Failed to get confirmed requests: {}", e.getMessage());
+        }
+        return confirmed;
     }
 
-    private RatingStatsDto getRating(Long eventId) {
-        try {
-            RatingStatsDto stats = ratingClient.getStats(eventId);
-            return stats == null ? RatingStatsDto.EMPTY : stats;
-        } catch (Exception e) {
-            log.warn("Failed to get rating for event {}: {}", eventId, e.getMessage());
-            return RatingStatsDto.EMPTY;
+    private Map<Long, Long> zeroCounts(List<Long> eventIds) {
+        Map<Long, Long> counts = new HashMap<>();
+        for (Long eventId : eventIds) {
+            counts.put(eventId, 0L);
         }
+        return counts;
     }
 
-    private Long getCommentCount(Long eventId) {
-        try {
-            Long count = commentClient.getCount(eventId);
-            return count == null ? 0L : count;
-        } catch (Exception e) {
-            log.warn("Failed to get comment count for event {}: {}", eventId, e.getMessage());
-            return 0L;
+    private Set<Long> getSubscribedInitiators(Long userId, List<Event> events) {
+        if (userId == null) {
+            return Set.of();
         }
-    }
-
-    private boolean isSubscribed(Long userId, Long initiatorId) {
-        if (userId.equals(initiatorId)) {
-            return false;
+        List<Long> initiatorIds = events.stream()
+                .map(Event::getInitiatorId)
+                .filter(id -> !userId.equals(id))
+                .distinct()
+                .toList();
+        if (initiatorIds.isEmpty()) {
+            return Set.of();
         }
         try {
-            Boolean subscribed = subscriptionClient.isSubscribed(userId, initiatorId);
-            return Boolean.TRUE.equals(subscribed);
+            List<Long> followed = subscriptionClient.getFollowed(userId, initiatorIds);
+            return followed == null ? Set.of() : new HashSet<>(followed);
         } catch (Exception e) {
-            log.warn("Failed to check subscription: {}", e.getMessage());
-            return false;
+            log.warn("Failed to check subscriptions: {}", e.getMessage());
+            return Set.of();
         }
     }
 

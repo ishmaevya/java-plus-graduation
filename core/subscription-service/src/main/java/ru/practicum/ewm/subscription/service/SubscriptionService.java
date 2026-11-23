@@ -26,4 +26,6 @@ public interface SubscriptionService {
     void cancel(Long userId, Long subscriptionId);
 
     boolean isSubscribed(Long followerId, Long followedId);
+
+    List<Long> getFollowedIds(Long followerId, List<Long> followedIds);
 }

@@ -2,13 +2,14 @@ package ru.practicum.ewm.rating.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.common.client.EventClient;
 import ru.practicum.ewm.common.client.UserClient;
 import ru.practicum.ewm.common.dto.EventSnapshotDto;
 import ru.practicum.ewm.common.dto.RatingStatsDto;
 import ru.practicum.ewm.common.exception.ConflictException;
+import ru.practicum.ewm.common.transaction.TransactionRunner;
 import ru.practicum.ewm.rating.model.EventRating;
 import ru.practicum.ewm.rating.model.RatingType;
 import ru.practicum.ewm.rating.repository.EventRatingRepository;
@@ -22,15 +23,20 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class RatingServiceImpl implements RatingService {
 
     private final EventRatingRepository ratingRepository;
     private final UserClient userClient;
     private final EventClient eventClient;
 
+    private TransactionRunner transactionRunner = new TransactionRunner();
+
+    @Autowired
+    public void setTransactionRunner(TransactionRunner transactionRunner) {
+        this.transactionRunner = transactionRunner;
+    }
+
     @Override
-    @Transactional
     public void setRating(Long userId, Long eventId, RatingType type) {
         userClient.getById(userId);
         EventSnapshotDto event = eventClient.getById(eventId);
@@ -42,19 +48,21 @@ public class RatingServiceImpl implements RatingService {
             throw new ConflictException("An initiator cannot rate their own event");
         }
 
-        EventRating rating = ratingRepository.findByEventIdAndUserId(eventId, userId)
-                .orElseGet(() -> EventRating.builder().eventId(eventId).userId(userId).build());
-        rating.setType(type);
-        ratingRepository.save(rating);
+        transactionRunner.execute(() -> {
+            EventRating rating = ratingRepository.findByEventIdAndUserId(eventId, userId)
+                    .orElseGet(() -> EventRating.builder().eventId(eventId).userId(userId).build());
+            rating.setType(type);
+            ratingRepository.save(rating);
+        });
         log.debug("Rating set by user {} for event {}: {}", userId, eventId, type);
     }
 
     @Override
-    @Transactional
     public void deleteRating(Long userId, Long eventId) {
         userClient.getById(userId);
         eventClient.getById(eventId);
-        ratingRepository.findByEventIdAndUserId(eventId, userId).ifPresent(ratingRepository::delete);
+        transactionRunner.execute(() -> ratingRepository.findByEventIdAndUserId(eventId, userId)
+                .ifPresent(ratingRepository::delete));
     }
 
     @Override

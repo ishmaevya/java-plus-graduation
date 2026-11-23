@@ -5,6 +5,7 @@ import ru.practicum.ewm.common.dto.EventRequestStatusUpdateResult;
 import ru.practicum.ewm.common.dto.ParticipationRequestDto;
 
 import java.util.List;
+import java.util.Map;
 
 public interface RequestService {
 
@@ -24,6 +25,8 @@ public interface RequestService {
     List<ParticipationRequestDto> getByIds(List<Long> ids);
 
     long getConfirmedCount(Long eventId);
+
+    Map<Long, Long> getConfirmedCounts(List<Long> eventIds);
 
     List<ParticipationRequestDto> getConfirmed(Long eventId);
 }

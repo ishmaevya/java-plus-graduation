@@ -23,6 +23,7 @@ import ru.practicum.ewm.request.repository.ParticipationRequestRepository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -196,6 +197,16 @@ class RequestServiceImplTest {
         when(requestRepository.countByEventIdAndStatus(10L, RequestStatus.CONFIRMED)).thenReturn(3L);
 
         assertEquals(3L, service.getConfirmedCount(10L));
+    }
+
+    @Test
+    void getConfirmedCountsDefaultsMissingEventsToZero() {
+        when(requestRepository.countByEventIdsAndStatus(List.of(10L, 11L), RequestStatus.CONFIRMED))
+                .thenReturn(List.<Object[]>of(new Object[]{10L, 3L}));
+
+        Map<Long, Long> result = service.getConfirmedCounts(List.of(10L, 11L));
+
+        assertEquals(Map.of(10L, 3L, 11L, 0L), result);
     }
 
     private EventSnapshotDto event(Long initiatorId, String state, Integer limit, Boolean moderation) {

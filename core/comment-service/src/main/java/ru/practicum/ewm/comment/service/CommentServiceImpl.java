@@ -2,9 +2,9 @@ package ru.practicum.ewm.comment.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.comment.exception.CommentNotFoundException;
 import ru.practicum.ewm.comment.exception.EventNotFoundException;
 import ru.practicum.ewm.comment.mapper.CommentMapper;
@@ -18,6 +18,7 @@ import ru.practicum.ewm.common.dto.NewCommentDto;
 import ru.practicum.ewm.common.dto.UpdateCommentDto;
 import ru.practicum.ewm.common.dto.UserDto;
 import ru.practicum.ewm.common.exception.ConflictException;
+import ru.practicum.ewm.common.transaction.TransactionRunner;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -30,7 +31,6 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class CommentServiceImpl implements CommentService {
 
     private final CommentRepository commentRepository;
@@ -38,8 +38,14 @@ public class CommentServiceImpl implements CommentService {
     private final EventClient eventClient;
     private final CommentMapper mapper;
 
+    private TransactionRunner transactionRunner = new TransactionRunner();
+
+    @Autowired
+    public void setTransactionRunner(TransactionRunner transactionRunner) {
+        this.transactionRunner = transactionRunner;
+    }
+
     @Override
-    @Transactional
     public CommentDto create(Long userId, Long eventId, NewCommentDto dto) {
         UserDto author = userClient.getById(userId);
         EventSnapshotDto event = eventClient.getById(eventId);
@@ -47,42 +53,42 @@ public class CommentServiceImpl implements CommentService {
             throw new EventNotFoundException(eventId);
         }
 
-        Comment comment = mapper.toComment(dto, eventId, userId);
-        comment = commentRepository.save(comment);
+        Comment comment = transactionRunner.execute(() -> commentRepository.save(mapper.toComment(dto, eventId, userId)));
         log.debug("Comment created: {} by user {} on event {}", comment.getId(), userId, eventId);
         return mapper.toCommentDto(comment, author.getName());
     }
 
     @Override
-    @Transactional
     public CommentDto update(Long userId, Long commentId, UpdateCommentDto dto) {
         UserDto author = userClient.getById(userId);
-        Comment comment = findComment(commentId);
-        checkAuthor(comment, userId, "edit");
-
-        comment.setText(dto.getText());
-        comment.setUpdated(LocalDateTime.now());
-        comment = commentRepository.save(comment);
+        Comment comment = transactionRunner.execute(() -> {
+            Comment existing = findComment(commentId);
+            checkAuthor(existing, userId, "edit");
+            existing.setText(dto.getText());
+            existing.setUpdated(LocalDateTime.now());
+            return commentRepository.save(existing);
+        });
         log.debug("Comment updated: {}", commentId);
         return mapper.toCommentDto(comment, author.getName());
     }
 
     @Override
-    @Transactional
     public void deleteUserComment(Long userId, Long commentId) {
         userClient.getById(userId);
-        Comment comment = findComment(commentId);
-        checkAuthor(comment, userId, "delete");
-
-        commentRepository.delete(comment);
+        transactionRunner.execute(() -> {
+            Comment comment = findComment(commentId);
+            checkAuthor(comment, userId, "delete");
+            commentRepository.delete(comment);
+        });
         log.debug("Comment deleted by author: {}", commentId);
     }
 
     @Override
-    @Transactional
     public void deleteByAdmin(Long commentId) {
-        Comment comment = findComment(commentId);
-        commentRepository.delete(comment);
+        transactionRunner.execute(() -> {
+            Comment comment = findComment(commentId);
+            commentRepository.delete(comment);
+        });
         log.debug("Comment deleted by admin: {}", commentId);
     }
 

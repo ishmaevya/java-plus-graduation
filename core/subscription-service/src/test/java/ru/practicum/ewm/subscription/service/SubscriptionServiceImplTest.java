@@ -126,6 +126,14 @@ class SubscriptionServiceImplTest {
         assertFalse(subscriptionService.isSubscribed(1L, 1L));
     }
 
+    @Test
+    void getFollowedIdsReturnsConfirmedSubscriptions() {
+        when(subscriptionRepository.findFollowedIds(
+                1L, List.of(2L, 3L), SubscriptionStatus.CONFIRMED)).thenReturn(List.of(2L));
+
+        assertEquals(List.of(2L), subscriptionService.getFollowedIds(1L, List.of(2L, 3L)));
+    }
+
     private static UserDto user(Long id, String name) {
         return UserDto.builder().id(id).name(name).build();
     }

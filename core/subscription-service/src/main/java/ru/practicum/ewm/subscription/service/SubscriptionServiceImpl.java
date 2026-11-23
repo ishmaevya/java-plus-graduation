@@ -2,8 +2,8 @@ package ru.practicum.ewm.subscription.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import ru.practicum.ewm.common.client.UserClient;
 import ru.practicum.ewm.common.dto.SubscriptionDto;
 import ru.practicum.ewm.common.dto.SubscriptionInputDto;
@@ -11,6 +11,7 @@ import ru.practicum.ewm.common.dto.SubscriptionStatusUpdateResult;
 import ru.practicum.ewm.common.dto.UserDto;
 import ru.practicum.ewm.common.dto.UserShortDto;
 import ru.practicum.ewm.common.exception.ConflictException;
+import ru.practicum.ewm.common.transaction.TransactionRunner;
 import ru.practicum.ewm.subscription.exception.SubscriptionNotFoundException;
 import ru.practicum.ewm.subscription.mapper.SubscriptionMapper;
 import ru.practicum.ewm.subscription.model.Subscription;
@@ -29,46 +30,51 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class SubscriptionServiceImpl implements SubscriptionService {
 
     private final SubscriptionRepository subscriptionRepository;
     private final UserClient userClient;
     private final SubscriptionMapper mapper;
 
+    private TransactionRunner transactionRunner = new TransactionRunner();
+
+    @Autowired
+    public void setTransactionRunner(TransactionRunner transactionRunner) {
+        this.transactionRunner = transactionRunner;
+    }
+
     @Override
-    @Transactional
     public SubscriptionDto create(Long userId, SubscriptionInputDto dto) {
         UserDto follower = userClient.getById(userId);
         UserDto followed = userClient.getById(dto.getTargetUserId());
         if (userId.equals(dto.getTargetUserId())) {
             throw new ConflictException("Cannot subscribe to yourself");
         }
-        if (subscriptionRepository.existsByFollowerIdAndFollowedId(userId, dto.getTargetUserId())) {
-            throw new ConflictException("Subscription already exists");
-        }
 
-        Subscription subscription = subscriptionRepository.save(Subscription.builder()
-                .followerId(userId)
-                .followedId(dto.getTargetUserId())
-                .status(SubscriptionStatus.PENDING)
-                .created(LocalDateTime.now())
-                .build());
+        Subscription subscription = transactionRunner.execute(() -> {
+            if (subscriptionRepository.existsByFollowerIdAndFollowedId(userId, dto.getTargetUserId())) {
+                throw new ConflictException("Subscription already exists");
+            }
+            return subscriptionRepository.save(Subscription.builder()
+                    .followerId(userId)
+                    .followedId(dto.getTargetUserId())
+                    .status(SubscriptionStatus.PENDING)
+                    .created(LocalDateTime.now())
+                    .build());
+        });
         log.debug("Subscription created: {} by user {} to {}", subscription.getId(), userId, dto.getTargetUserId());
         return mapper.toDto(subscription,
                 Map.of(userId, toShort(follower), dto.getTargetUserId(), toShort(followed)));
     }
 
     @Override
-    @Transactional
     public SubscriptionStatusUpdateResult confirm(Long userId, Long subscriptionId) {
-        return updateStatus(userId, subscriptionId, SubscriptionStatus.CONFIRMED);
+        return transactionRunner.execute(() -> updateStatus(userId, subscriptionId, SubscriptionStatus.CONFIRMED));
     }
 
     @Override
-    @Transactional
     public SubscriptionStatusUpdateResult reject(Long userId, Long subscriptionId) {
-        return updateStatus(userId, subscriptionId, SubscriptionStatus.REJECTED);
+        return transactionRunner.execute(() -> updateStatus(userId, subscriptionId, SubscriptionStatus.REJECTED));
     }
 
     @Override
@@ -105,15 +111,16 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     }
 
     @Override
-    @Transactional
     public void cancel(Long userId, Long subscriptionId) {
-        Subscription subscription = subscriptionRepository.findById(subscriptionId)
-                .orElseThrow(SubscriptionNotFoundException::new);
-        if (!subscription.getFollowerId().equals(userId)) {
-            throw new SubscriptionNotFoundException();
-        }
-        subscription.setStatus(SubscriptionStatus.CANCELED);
-        subscriptionRepository.save(subscription);
+        transactionRunner.execute(() -> {
+            Subscription subscription = subscriptionRepository.findById(subscriptionId)
+                    .orElseThrow(SubscriptionNotFoundException::new);
+            if (!subscription.getFollowerId().equals(userId)) {
+                throw new SubscriptionNotFoundException();
+            }
+            subscription.setStatus(SubscriptionStatus.CANCELED);
+            subscriptionRepository.save(subscription);
+        });
         log.debug("Subscription canceled: {}", subscriptionId);
     }
 
@@ -124,6 +131,15 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         }
         return subscriptionRepository.existsByFollowerIdAndFollowedIdAndStatus(
                 followerId, followedId, SubscriptionStatus.CONFIRMED);
+    }
+
+    @Override
+    public List<Long> getFollowedIds(Long followerId, List<Long> followedIds) {
+        if (followedIds.isEmpty()) {
+            return List.of();
+        }
+        return subscriptionRepository.findFollowedIds(
+                followerId, followedIds, SubscriptionStatus.CONFIRMED);
     }
 
     private SubscriptionStatusUpdateResult updateStatus(Long userId,
