@@ -1,0 +1,58 @@
+server:
+  port: 8080
+
+spring:
+  cloud:
+    loadbalancer:
+      cache:
+        ttl: 5s
+    gateway:
+      discovery:
+        locator:
+          enabled: false
+      routes:
+        - id: comment-service
+          uri: lb://comment-service
+          order: 1
+          predicates:
+            - "Path=/admin/comments,/admin/comments/**,/events/*/comments,/events/*/comments/**,/users/*/comments,/users/*/comments/**,/users/*/events/*/comments,/users/*/events/*/comments/**"
+        - id: rating-service
+          uri: lb://rating-service
+          order: 2
+          predicates:
+            - "Path=/users/*/events/*/like,/users/*/events/*/dislike,/users/*/events/*/rating"
+        - id: request-service
+          uri: lb://request-service
+          order: 3
+          predicates:
+            - "Path=/users/*/requests,/users/*/requests/**,/users/*/events/*/requests,/users/*/events/*/requests/**"
+        - id: subscription-service
+          uri: lb://subscription-service
+          order: 4
+          predicates:
+            - "Path=/users/*/subscriptions,/users/*/subscriptions/**"
+        - id: location-service
+          uri: lb://location-service
+          order: 5
+          predicates:
+            - "Path=/locations,/locations/**,/admin/locations,/admin/locations/**"
+        - id: compilation-service
+          uri: lb://compilation-service
+          order: 6
+          predicates:
+            - "Path=/compilations,/compilations/**,/admin/compilations,/admin/compilations/**"
+        - id: category-service
+          uri: lb://category-service
+          order: 7
+          predicates:
+            - "Path=/categories,/categories/**,/admin/categories,/admin/categories/**"
+        - id: user-service
+          uri: lb://user-service
+          order: 8
+          predicates:
+            - "Path=/admin/users,/admin/users/**"
+        - id: event-service
+          uri: lb://event-service
+          order: 9
+          predicates:
+            - "Path=/events,/events/**,/admin/events,/admin/events/**,/users/*/events,/users/*/events/**"

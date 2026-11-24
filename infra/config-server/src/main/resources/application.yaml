@@ -1,5 +1,5 @@
 server:
-  port: 0
+  port: ${SERVER_PORT:8888}
 
 spring:
   application:
@@ -10,7 +10,10 @@ spring:
     config:
       server:
         native:
-          search-locations: classpath:/config
+          search-locations:
+            - classpath:/config/stats/{application}
+            - classpath:/config/core/{application}
+            - classpath:/config/infra/{application}
 
 eureka:
   client:
