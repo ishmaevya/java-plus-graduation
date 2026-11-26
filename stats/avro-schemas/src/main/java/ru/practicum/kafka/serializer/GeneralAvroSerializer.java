@@ -11,8 +11,6 @@ import org.apache.kafka.common.serialization.Serializer;
 
 public class GeneralAvroSerializer implements Serializer<SpecificRecordBase> {
 
-    private final DatumWriter<SpecificRecordBase> writer = new SpecificDatumWriter<>(SpecificRecordBase.class);
-
     @Override
     public void configure(java.util.Map<String, ?> configs, boolean isKey) {
     }
@@ -23,6 +21,7 @@ public class GeneralAvroSerializer implements Serializer<SpecificRecordBase> {
             return null;
         }
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            DatumWriter<SpecificRecordBase> writer = new SpecificDatumWriter<>(data.getSchema());
             BinaryEncoder encoder = EncoderFactory.get().binaryEncoder(output, null);
             writer.write(data, encoder);
             encoder.flush();
