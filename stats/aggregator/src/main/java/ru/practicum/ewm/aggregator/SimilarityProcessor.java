@@ -21,20 +21,52 @@ public class SimilarityProcessor {
         long userId = action.getUserId();
         double actionWeight = ActionWeights.get(action.getActionType());
 
-        Map<Long, Double> users = eventWeights.computeIfAbsent(eventId, key -> new HashMap<>());
+        List<EventSimilarityAvro> similarities = new ArrayList<>();
+        Instant timestamp = Instant.now();
+
+        Map<Long, Double> users = eventWeights.get(eventId);
+        if (users == null) {
+            users = new HashMap<>();
+            eventWeights.put(eventId, users);
+            users.put(userId, actionWeight);
+            eventNormSums.put(eventId, actionWeight);
+
+            for (Map.Entry<Long, Map<Long, Double>> entry : eventWeights.entrySet()) {
+                long otherEventId = entry.getKey();
+                if (otherEventId == eventId) {
+                    continue;
+                }
+
+                double otherWeight = entry.getValue().getOrDefault(userId, 0.0);
+                if (otherWeight <= 0.0) {
+                    continue;
+                }
+
+                double minSum = Math.min(actionWeight, otherWeight);
+                EventPair pair = EventPair.of(eventId, otherEventId);
+                pairMinSums.put(pair, minSum);
+                double score = minSum / (Math.sqrt(eventNormSums.get(eventId))
+                        * Math.sqrt(eventNormSums.get(otherEventId)));
+
+                similarities.add(EventSimilarityAvro.newBuilder()
+                        .setEventA(pair.eventA())
+                        .setEventB(pair.eventB())
+                        .setScore(score)
+                        .setTimestamp(timestamp)
+                        .build());
+            }
+
+            return similarities;
+        }
+
         double oldWeight = users.getOrDefault(userId, 0.0);
         double newWeight = Math.max(oldWeight, actionWeight);
-        double delta = newWeight - oldWeight;
-
-        if (delta <= 0.0) {
+        if (newWeight == oldWeight) {
             return List.of();
         }
 
         users.put(userId, newWeight);
-        eventNormSums.merge(eventId, delta, Double::sum);
-
-        List<EventSimilarityAvro> similarities = new ArrayList<>();
-        Instant timestamp = Instant.now();
+        eventNormSums.merge(eventId, newWeight - oldWeight, Double::sum);
 
         for (Map.Entry<Long, Map<Long, Double>> entry : eventWeights.entrySet()) {
             long otherEventId = entry.getKey();
@@ -47,13 +79,7 @@ public class SimilarityProcessor {
                 continue;
             }
 
-            double oldMin = Math.min(oldWeight, otherWeight);
-            double newMin = Math.min(newWeight, otherWeight);
-            double minDelta = newMin - oldMin;
-            if (minDelta <= 0.0) {
-                continue;
-            }
-
+            double minDelta = Math.min(newWeight, otherWeight) - Math.min(oldWeight, otherWeight);
             EventPair pair = EventPair.of(eventId, otherEventId);
             double minSum = pairMinSums.merge(pair, minDelta, Double::sum);
             double score = minSum / (Math.sqrt(eventNormSums.get(eventId))
