@@ -18,7 +18,10 @@ import ru.practicum.ewm.request.mapper.RequestMapper;
 import ru.practicum.ewm.request.model.ParticipationRequest;
 import ru.practicum.ewm.request.model.RequestStatus;
 import ru.practicum.ewm.request.repository.ParticipationRequestRepository;
+import ru.practicum.ewm.stats.grpc.ActionType;
+import ru.practicum.ewm.stats.grpc.UserActionClient;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -36,6 +39,7 @@ public class RequestServiceImpl implements RequestService {
     private final ParticipationRequestRepository requestRepository;
     private final UserClient userClient;
     private final EventClient eventClient;
+    private final UserActionClient userActionClient;
     private final RequestMapper mapper;
 
     private TransactionRunner transactionRunner = new TransactionRunner();
@@ -80,6 +84,11 @@ public class RequestServiceImpl implements RequestService {
                     .build());
         });
 
+        try {
+            userActionClient.collect(userId, eventId, ActionType.REGISTER, Instant.now());
+        } catch (Exception e) {
+            log.warn("Failed to collect register action: {}", e.getMessage());
+        }
         log.debug("Request created: {} for event {}", request.getId(), eventId);
         return mapper.toDto(request);
     }

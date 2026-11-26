@@ -28,7 +28,7 @@ public interface EventService {
                                      String rangeStart, String rangeEnd, Boolean onlyAvailable,
                                      String sort, Integer from, Integer size, Long userId);
 
-    EventFullDto getPublishedById(Long id);
+    EventFullDto getPublishedById(Long id, Long userId);
 
     EventSnapshotDto getSnapshot(Long eventId);
 

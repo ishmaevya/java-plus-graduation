@@ -1,0 +1,10 @@
+{
+  "type": "record",
+  "name": "EventAvro",
+  "namespace": "ru.practicum.ewm.stats.avro",
+  "fields": [
+    {"name": "id", "type": "long"},
+    {"name": "categoryId", "type": "long"},
+    {"name": "eventDate", "type": {"type": "long", "logicalType": "timestamp-millis"}}
+  ]
+}

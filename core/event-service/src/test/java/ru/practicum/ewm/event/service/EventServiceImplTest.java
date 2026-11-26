@@ -30,8 +30,8 @@ import ru.practicum.ewm.event.model.EventState;
 import ru.practicum.ewm.event.model.Location;
 import ru.practicum.ewm.event.repository.EventRepository;
 import ru.practicum.ewm.event.repository.EventSpecification;
-import ru.practicum.ewm.stats.clients.StatsClient;
-import ru.practicum.ewm.stats.dto.StatHitResponseElement;
+import ru.practicum.ewm.stats.grpc.RecommendationsClient;
+import ru.practicum.ewm.stats.grpc.UserActionClient;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -42,7 +42,6 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -81,7 +80,10 @@ class EventServiceImplTest {
     private SubscriptionClient subscriptionClient;
 
     @Mock
-    private StatsClient statsClient;
+    private RecommendationsClient recommendationsClient;
+
+    @Mock
+    private UserActionClient userActionClient;
 
     @InjectMocks
     private EventServiceImpl service;
@@ -147,7 +149,7 @@ class EventServiceImplTest {
         when(userClient.getById(1L)).thenReturn(user());
         stubCounters(100L);
 
-        EventFullDto result = service.getPublishedById(100L);
+        EventFullDto result = service.getPublishedById(100L, null);
 
         assertEquals(100L, result.getId());
     }
@@ -156,7 +158,7 @@ class EventServiceImplTest {
     void getPublishedByIdThrowsForMissingEvent() {
         when(eventRepository.findByIdAndState(404L, EventState.PUBLISHED)).thenReturn(Optional.empty());
 
-        assertThrows(EventNotFoundException.class, () -> service.getPublishedById(404L));
+        assertThrows(EventNotFoundException.class, () -> service.getPublishedById(404L, null));
     }
 
     @Test
@@ -181,14 +183,13 @@ class EventServiceImplTest {
         when(ratingClient.getStatsBatch(anyList())).thenReturn(Map.of());
         when(commentClient.getCounts(anyList())).thenReturn(Map.of());
         when(requestClient.getConfirmedCounts(anyList())).thenReturn(Map.of());
-        when(statsClient.getStats(any(), any(), anyList(), anyBoolean())).thenReturn(List.of(
-                new StatHitResponseElement("ewm-main-service", "/events/200", 5L)));
+        when(recommendationsClient.getInteractionsCount(anyList())).thenReturn(Map.of(200L, 5.0));
 
         List<EventShortDto> result = service.getByIds(List.of(200L, 100L));
 
         assertEquals(List.of(200L, 100L), result.stream().map(EventShortDto::getId).toList());
-        assertEquals(5L, result.getFirst().getViews());
-        verify(statsClient, times(1)).getStats(any(), any(), anyList(), anyBoolean());
+        assertEquals(5.0, result.getFirst().getRating());
+        verify(recommendationsClient, times(1)).getInteractionsCount(anyList());
         verify(requestClient, times(1)).getConfirmedCounts(anyList());
     }
 
