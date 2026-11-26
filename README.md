@@ -38,7 +38,7 @@
 - Kafka: `localhost:9092`, темы `stats.user-actions.v1` и `stats.events-similarity.v1`.
 - `stats/collector`: HTTP `9093`, gRPC `9091`.
 - `stats/aggregator`: HTTP `9094`.
-- `stats/analyzer`: HTTP `9095`, gRPC `9092`.
+- `stats/analyzer`: HTTP `9095`, gRPC `9096`.
 
 Маршруты gateway направлены на сервисы через Eureka. Маршруты `/internal/**` наружу не публикуются.
 

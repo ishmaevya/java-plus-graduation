@@ -16,7 +16,7 @@ spring:
 
 grpc:
   server:
-    port: ${GRPC_PORT:9092}
+    port: ${GRPC_PORT:9096}
 
 eureka:
   client:
@@ -25,7 +25,7 @@ eureka:
   instance:
     prefer-ip-address: true
     metadata-map:
-      gRPC_port: ${GRPC_PORT:9092}
+      gRPC_port: ${GRPC_PORT:9096}
 
 analyzer:
   consumer:
