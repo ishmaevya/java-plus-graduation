@@ -1,6 +1,5 @@
 package ru.practicum.ewm.aggregator;
 
-import java.util.concurrent.ExecutionException;
 import org.apache.avro.specific.SpecificRecordBase;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,11 +27,11 @@ public class UserActionListener {
 
     @KafkaListener(topics = "${aggregator.topic.user-actions}",
             groupId = "${aggregator.consumer.group-id}")
-    public void onMessage(ConsumerRecord<Long, UserActionAvro> record, Acknowledgment acknowledgment)
-            throws InterruptedException, ExecutionException {
+    public void onMessage(ConsumerRecord<Long, UserActionAvro> record, Acknowledgment acknowledgment) {
         for (EventSimilarityAvro similarity : similarityProcessor.process(record.value())) {
-            kafkaTemplate.send(similarityTopic, similarityKey(similarity), similarity).get();
+            kafkaTemplate.send(similarityTopic, similarityKey(similarity), similarity);
         }
+        kafkaTemplate.flush();
         acknowledgment.acknowledge();
     }
 
