@@ -3,6 +3,7 @@ package ru.practicum.ewm.event.controller;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,9 +34,23 @@ public class EventPublicController {
                 onlyAvailable, sort, from, size, userId);
     }
 
+    @GetMapping("/events/recommendations")
+    public List<EventShortDto> getRecommendations(
+            @RequestHeader(value = "X-EWM-UserId", required = false) Long headerUserId,
+            @RequestParam(value = "userId", required = false) Long userId,
+            @RequestParam(defaultValue = "10") Integer maxResults) {
+        return eventService.getRecommendations(userId != null ? userId : headerUserId, maxResults);
+    }
+
     @GetMapping("/events/{id}")
     public EventFullDto getPublishedById(@PathVariable Long id,
                                          @RequestHeader(value = "X-EWM-UserId", required = false) Long userId) {
         return eventService.getPublishedById(id, userId);
+    }
+
+    @PutMapping("/events/{eventId}/like")
+    public void like(@PathVariable Long eventId,
+                     @RequestHeader(value = "X-EWM-UserId") Long userId) {
+        eventService.like(userId, eventId);
     }
 }

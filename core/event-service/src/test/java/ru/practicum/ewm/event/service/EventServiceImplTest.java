@@ -30,9 +30,12 @@ import ru.practicum.ewm.event.model.EventState;
 import ru.practicum.ewm.event.model.Location;
 import ru.practicum.ewm.event.repository.EventRepository;
 import ru.practicum.ewm.event.repository.EventSpecification;
+import ru.practicum.ewm.stats.grpc.ActionType;
 import ru.practicum.ewm.stats.grpc.RecommendationsClient;
+import ru.practicum.ewm.stats.grpc.RecommendedEvent;
 import ru.practicum.ewm.stats.grpc.UserActionClient;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -43,6 +46,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -191,6 +196,48 @@ class EventServiceImplTest {
         assertEquals(5.0, result.getFirst().getRating());
         verify(recommendationsClient, times(1)).getInteractionsCount(anyList());
         verify(requestClient, times(1)).getConfirmedCounts(anyList());
+    }
+
+    @Test
+    void getRecommendationsKeepsAnalyzerOrder() {
+        Event first = event(EventState.PUBLISHED);
+        Event second = event(EventState.PUBLISHED);
+        second.setId(200L);
+        when(recommendationsClient.getRecommendations(1L, 2)).thenReturn(List.of(
+                new RecommendedEvent(200L, 0.8),
+                new RecommendedEvent(100L, 0.7)));
+        when(eventRepository.findByIdIn(List.of(200L, 100L))).thenReturn(List.of(first, second));
+        when(categoryClient.getByIds(anyList())).thenReturn(List.of(category()));
+        when(userClient.getByIds(anyList())).thenReturn(List.of(user()));
+        when(ratingClient.getStatsBatch(anyList())).thenReturn(Map.of());
+        when(commentClient.getCounts(anyList())).thenReturn(Map.of());
+        when(requestClient.getConfirmedCounts(anyList())).thenReturn(Map.of());
+        when(recommendationsClient.getInteractionsCount(anyList())).thenReturn(Map.of(200L, 5.0));
+
+        List<EventShortDto> result = service.getRecommendations(1L, 2);
+
+        assertEquals(List.of(200L, 100L), result.stream().map(EventShortDto::getId).toList());
+    }
+
+    @Test
+    void likeRequiresViewAndSendsLikeAction() {
+        when(eventRepository.findByIdAndState(100L, EventState.PUBLISHED))
+                .thenReturn(Optional.of(event(EventState.PUBLISHED)));
+        when(recommendationsClient.hasUserViewedEvent(1L, 100L)).thenReturn(true);
+
+        service.like(1L, 100L);
+
+        verify(userActionClient).collect(eq(1L), eq(100L), eq(ActionType.LIKE), any(Instant.class));
+    }
+
+    @Test
+    void likeRejectsEventWithoutView() {
+        when(eventRepository.findByIdAndState(100L, EventState.PUBLISHED))
+                .thenReturn(Optional.of(event(EventState.PUBLISHED)));
+        when(recommendationsClient.hasUserViewedEvent(1L, 100L)).thenReturn(false);
+
+        assertThrows(ConflictException.class, () -> service.like(1L, 100L));
+        verify(userActionClient, times(0)).collect(anyLong(), anyLong(), any(), any());
     }
 
     private void stubCounters(Long eventId) {

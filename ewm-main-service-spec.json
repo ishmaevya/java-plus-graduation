@@ -1208,6 +1208,111 @@
         ]
       }
     },
+    "/events/recommendations": {
+      "get": {
+        "description": "Возвращает рекомендованные события для пользователя на основе его последних действий",
+        "operationId": "getRecommendations",
+        "parameters": [
+          {
+            "description": "идентификатор пользователя",
+            "in": "header",
+            "name": "X-EWM-UserId",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "description": "количество рекомендаций",
+            "in": "query",
+            "name": "maxResults",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "minimum": 1,
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EventShortDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Рекомендации получены"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Запрос составлен некорректно"
+          }
+        },
+        "summary": "Получение рекомендованных событий",
+        "tags": [
+          "Public: События"
+        ]
+      }
+    },
+    "/events/{eventId}/like": {
+      "put": {
+        "description": "Отправляет действие LIKE в коллектор. Событие должно быть опубликовано и просмотрено пользователем",
+        "operationId": "likeEvent",
+        "parameters": [
+          {
+            "description": "id события",
+            "in": "path",
+            "name": "eventId",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "description": "идентификатор пользователя",
+            "in": "header",
+            "name": "X-EWM-UserId",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Лайк сохранён"
+          },
+          "400": {
+            "description": "Запрос составлен некорректно"
+          },
+          "404": {
+            "description": "Событие не найдено"
+          },
+          "409": {
+            "description": "Событие не было просмотрено пользователем"
+          }
+        },
+        "summary": "Лайк опубликованного события",
+        "tags": [
+          "Public: События"
+        ]
+      }
+    },
     "/events/{id}": {
       "get": {
         "description": "Обратите внимание:\n- событие должно быть опубликовано\n- информация о событии должна включать в себя количество просмотров и количество подтвержденных запросов\n- информацию о том, что по этому эндпоинту был осуществлен и обработан запрос, нужно сохранить в сервисе статистики\n\nВ случае, если события с заданным id не найдено, возвращает статус код 404",

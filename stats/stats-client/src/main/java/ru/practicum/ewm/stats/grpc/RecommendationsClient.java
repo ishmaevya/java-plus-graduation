@@ -12,4 +12,6 @@ public interface RecommendationsClient {
     Map<Long, Double> getInteractionsCount(List<Long> eventIds);
 
     boolean hasUserInteraction(long userId, long eventId);
+
+    boolean hasUserViewedEvent(long userId, long eventId);
 }

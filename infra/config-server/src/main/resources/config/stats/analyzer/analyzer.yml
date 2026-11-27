@@ -13,10 +13,22 @@ spring:
       value-deserializer: ru.practicum.kafka.deserializer.UserActionDeserializer
     listener:
       ack-mode: manual
+  datasource:
+    url: ${DATASOURCE_URL:jdbc:postgresql://localhost:5432/ewm_analyzer}
+    username: ${DATASOURCE_USERNAME:postgres}
+    password: ${DATASOURCE_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+  sql:
+    init:
+      mode: always
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
 
 grpc:
   server:
-    port: ${GRPC_PORT:9096}
+    port: 0
 
 eureka:
   client:
@@ -25,7 +37,7 @@ eureka:
   instance:
     prefer-ip-address: true
     metadata-map:
-      gRPC_port: ${GRPC_PORT:9096}
+      gRPC_port: 0
 
 analyzer:
   consumer:

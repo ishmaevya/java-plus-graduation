@@ -30,6 +30,10 @@ public interface EventService {
 
     EventFullDto getPublishedById(Long id, Long userId);
 
+    List<EventShortDto> getRecommendations(Long userId, Integer maxResults);
+
+    void like(Long userId, Long eventId);
+
     EventSnapshotDto getSnapshot(Long eventId);
 
     List<EventShortDto> getByIds(List<Long> ids);

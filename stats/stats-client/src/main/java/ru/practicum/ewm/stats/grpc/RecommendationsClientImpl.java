@@ -10,11 +10,12 @@ import java.util.concurrent.TimeUnit;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Component;
 import ru.practicum.ewm.stats.proto.HasUserInteractionRequestProto;
+import ru.practicum.ewm.stats.proto.HasUserViewedEventRequestProto;
 import ru.practicum.ewm.stats.proto.InteractionsCountRequestProto;
 import ru.practicum.ewm.stats.proto.RecommendationsControllerGrpc;
 import ru.practicum.ewm.stats.proto.RecommendedEventProto;
 import ru.practicum.ewm.stats.proto.SimilarEventsRequestProto;
-import ru.practicum.ewm.stats.proto.UserRecommendationsRequestProto;
+import ru.practicum.ewm.stats.proto.UserPredictionsRequestProto;
 
 @Component
 public class RecommendationsClientImpl implements RecommendationsClient {
@@ -25,7 +26,7 @@ public class RecommendationsClientImpl implements RecommendationsClient {
     @Override
     public List<RecommendedEvent> getRecommendations(long userId, int maxResults) {
         Iterator<RecommendedEventProto> iterator = stub().getRecommendationsForUser(
-                UserRecommendationsRequestProto.newBuilder()
+                UserPredictionsRequestProto.newBuilder()
                         .setUserId(userId)
                         .setMaxResults(maxResults)
                         .build());
@@ -64,6 +65,15 @@ public class RecommendationsClientImpl implements RecommendationsClient {
                         .setEventId(eventId)
                         .build())
                 .getInteracted();
+    }
+
+    @Override
+    public boolean hasUserViewedEvent(long userId, long eventId) {
+        return stub().hasUserViewedEvent(HasUserViewedEventRequestProto.newBuilder()
+                        .setUserId(userId)
+                        .setEventId(eventId)
+                        .build())
+                .getViewed();
     }
 
     private RecommendationsControllerGrpc.RecommendationsControllerBlockingStub stub() {

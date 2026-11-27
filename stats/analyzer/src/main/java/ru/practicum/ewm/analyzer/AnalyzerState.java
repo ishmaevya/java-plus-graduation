@@ -1,12 +1,22 @@
 package ru.practicum.ewm.analyzer;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import ru.practicum.ewm.stats.avro.ActionTypeAvro;
 import ru.practicum.ewm.stats.avro.EventSimilarityAvro;
 import ru.practicum.ewm.stats.avro.UserActionAvro;
 
@@ -15,106 +25,182 @@ public class AnalyzerState {
 
     private static final int SIBLINGS_LIMIT = 20;
 
-    private final Map<Long, Map<Long, UserInteraction>> userInteractions = new HashMap<>();
-    private final Map<Long, Double> eventRatingSums = new HashMap<>();
-    private final Map<Long, Map<Long, Double>> similarityByEvent = new HashMap<>();
+    private final UserInteractionRepository userInteractions;
+    private final EventSimilarityRepository eventSimilarities;
 
-    public synchronized void registerAction(UserActionAvro action) {
+    public AnalyzerState(UserInteractionRepository userInteractions,
+                         EventSimilarityRepository eventSimilarities) {
+        this.userInteractions = userInteractions;
+        this.eventSimilarities = eventSimilarities;
+    }
+
+    @Transactional
+    public void registerAction(UserActionAvro action) {
         long userId = action.getUserId();
         long eventId = action.getEventId();
         double weight = ActionWeights.get(action.getActionType());
         Instant timestamp = action.getTimestamp();
+        boolean viewed = action.getActionType() == ActionTypeAvro.VIEW;
 
-        Map<Long, UserInteraction> interactions = userInteractions.computeIfAbsent(
-                userId, key -> new HashMap<>());
-        UserInteraction current = interactions.get(eventId);
-        boolean shouldUpdate = current == null
-                || weight > current.rating()
-                || (weight == current.rating() && timestamp.isAfter(current.timestamp()));
+        UserInteraction current = userInteractions.findByUserIdAndEventId(userId, eventId).orElse(null);
+        if (current == null) {
+            UserInteraction interaction = new UserInteraction();
+            interaction.setUserId(userId);
+            interaction.setEventId(eventId);
+            interaction.setWeight(weight);
+            interaction.setTimestamp(timestamp);
+            interaction.setViewed(viewed);
+            userInteractions.save(interaction);
+            return;
+        }
 
+        boolean newer = timestamp.isAfter(current.getTimestamp());
+        boolean higherWeight = weight > current.getWeight();
+        boolean sameWeightAndNewer = weight == current.getWeight() && newer;
+        boolean shouldUpdate = higherWeight || sameWeightAndNewer || viewed && !current.getViewed();
         if (shouldUpdate) {
-            double previous = current == null ? 0.0 : current.rating();
-            interactions.put(eventId, new UserInteraction(userId, eventId, weight, timestamp));
-            eventRatingSums.merge(eventId, weight - previous, Double::sum);
+            current.setWeight(higherWeight || sameWeightAndNewer ? weight : current.getWeight());
+            current.setTimestamp(newer ? timestamp : current.getTimestamp());
+            current.setViewed(current.getViewed() || viewed);
+            userInteractions.save(current);
         }
     }
 
-    public synchronized void registerSimilarity(EventSimilarityAvro similarity) {
-        long eventA = similarity.getEventA();
-        long eventB = similarity.getEventB();
+    @Transactional
+    public void registerSimilarity(EventSimilarityAvro similarity) {
+        long eventA = Math.min(similarity.getEventA(), similarity.getEventB());
+        long eventB = Math.max(similarity.getEventA(), similarity.getEventB());
 
-        similarityByEvent.computeIfAbsent(eventA, key -> new HashMap<>()).put(eventB, similarity.getScore());
-        similarityByEvent.computeIfAbsent(eventB, key -> new HashMap<>()).put(eventA, similarity.getScore());
-    }
-
-    public synchronized List<ScoredEvent> getSimilarEvents(long eventId, long userId, int maxResults) {
-        Map<Long, UserInteraction> interactions = userInteractions.getOrDefault(userId, Map.of());
-        if (maxResults <= 0 || interactions.containsKey(eventId)) {
-            return List.of();
+        EventSimilarity current = eventSimilarities.findByEventAAndEventB(eventA, eventB).orElse(null);
+        if (current == null) {
+            current = new EventSimilarity();
+            current.setEventA(eventA);
+            current.setEventB(eventB);
         }
-        return siblings(eventId, userId, false, maxResults);
+        current.setScore(similarity.getScore());
+        current.setTimestamp(similarity.getTimestamp());
+        eventSimilarities.save(current);
     }
 
-    public synchronized List<ScoredEvent> getRecommendations(long userId, int maxResults) {
+    @Transactional(readOnly = true)
+    public List<ScoredEvent> getSimilarEvents(long eventId, long userId, int maxResults) {
         if (maxResults <= 0) {
             return List.of();
         }
 
-        Map<Long, UserInteraction> interactions = userInteractions.getOrDefault(userId, Map.of());
-        Map<Long, double[]> accumulators = new HashMap<>();
-
-        for (Long candidate : similarityByEvent.keySet()) {
-            if (interactions.containsKey(candidate)) {
-                continue;
-            }
-
-            double numerator = 0.0;
-            double denominator = 0.0;
-            for (ScoredEvent similar : siblings(candidate, userId, true, SIBLINGS_LIMIT)) {
-                UserInteraction interaction = interactions.get(similar.eventId());
-                numerator += similar.score() * interaction.rating();
-                denominator += similar.score();
-            }
-
-            if (denominator > 0.0) {
-                accumulators.put(candidate, new double[]{numerator, denominator});
-            }
-        }
-
-        return accumulators.entrySet().stream()
-                .sorted(Comparator
-                        .comparingDouble((Map.Entry<Long, double[]> entry) -> entry.getValue()[0]
-                                / entry.getValue()[1])
-                        .reversed()
-                        .thenComparing(Map.Entry::getKey))
+        Set<Long> interacted = new HashSet<>(userInteractions.findEventIdsByUserId(userId));
+        return eventSimilarities.findByEventAOrEventB(eventId, eventId).stream()
+                .map(similarity -> new ScoredEvent(
+                        opposite(similarity, eventId), similarity.getScore()))
+                .filter(scored -> scored.eventId() != eventId)
+                .filter(scored -> !(interacted.contains(eventId)
+                        && interacted.contains(scored.eventId())))
+                .sorted(scoreComparator())
                 .limit(maxResults)
-                .map(entry -> new ScoredEvent(entry.getKey(), entry.getValue()[0] / entry.getValue()[1]))
                 .toList();
     }
 
-    public synchronized Map<Long, Double> getInteractionsCount(List<Long> eventIds) {
+    @Transactional(readOnly = true)
+    public List<ScoredEvent> getRecommendations(long userId, int maxResults) {
+        if (maxResults <= 0) {
+            return List.of();
+        }
+
+        List<UserInteraction> recent = userInteractions.findByUserIdOrderByTimestampDesc(
+                userId, PageRequest.of(0, maxResults));
+        if (recent.isEmpty()) {
+            return List.of();
+        }
+
+        List<UserInteraction> all = userInteractions.findByUserId(userId);
+        Map<Long, Double> weights = all.stream().collect(Collectors.toMap(
+                UserInteraction::getEventId,
+                UserInteraction::getWeight,
+                (first, second) -> first));
+        Set<Long> interacted = new HashSet<>(weights.keySet());
+        Set<Long> seeds = recent.stream()
+                .map(UserInteraction::getEventId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<ScoredEvent> candidates = eventSimilarities.findByEventAInOrEventBIn(seeds, seeds).stream()
+                .map(similarity -> new ScoredEvent(
+                        oppositeFromSet(similarity, seeds), similarity.getScore()))
+                .filter(candidate -> !interacted.contains(candidate.eventId()))
+                .sorted(scoreComparator())
+                .limit(maxResults)
+                .toList();
+
+        List<ScoredEvent> result = new ArrayList<>();
+        for (ScoredEvent candidate : candidates) {
+            double numerator = 0.0;
+            double denominator = 0.0;
+            List<ScoredEvent> siblings = eventSimilarities
+                    .findByEventAOrEventB(candidate.eventId(), candidate.eventId()).stream()
+                    .map(similarity -> new ScoredEvent(
+                            opposite(similarity, candidate.eventId()), similarity.getScore()))
+                    .filter(sibling -> interacted.contains(sibling.eventId()))
+                    .sorted(scoreComparator())
+                    .limit(SIBLINGS_LIMIT)
+                    .toList();
+            for (ScoredEvent sibling : siblings) {
+                numerator += sibling.score() * weights.get(sibling.eventId());
+                denominator += sibling.score();
+            }
+            if (denominator > 0.0) {
+                result.add(new ScoredEvent(candidate.eventId(), round(numerator / denominator)));
+            }
+        }
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Long, Double> getInteractionsCount(Collection<Long> eventIds) {
+        Set<Long> requested = new LinkedHashSet<>(eventIds);
         Map<Long, Double> counts = new HashMap<>();
-        for (Long eventId : new LinkedHashSet<>(eventIds)) {
-            counts.put(eventId, eventRatingSums.getOrDefault(eventId, 0.0));
+        for (Long eventId : requested) {
+            counts.put(eventId, 0.0);
+        }
+        if (requested.isEmpty()) {
+            return counts;
+        }
+        for (InteractionSum sum : userInteractions.sumWeightsByEventIds(requested)) {
+            counts.put(sum.getEventId(), sum.getTotalWeight());
         }
         return counts;
     }
 
-    public synchronized boolean hasLike(long userId, long eventId) {
-        UserInteraction interaction = userInteractions.getOrDefault(userId, Map.of()).get(eventId);
-        return interaction != null && interaction.rating() >= 1.0;
+    @Transactional(readOnly = true)
+    public boolean hasLike(long userId, long eventId) {
+        return userInteractions.findByUserIdAndEventId(userId, eventId)
+                .map(interaction -> interaction.getWeight() >= 1.0)
+                .orElse(false);
     }
 
-    private List<ScoredEvent> siblings(long eventId, long userId, boolean requireInteraction, int limit) {
-        Map<Long, UserInteraction> interactions = userInteractions.getOrDefault(userId, Map.of());
-        return similarityByEvent.getOrDefault(eventId, Map.of()).entrySet().stream()
-                .filter(entry -> interactions.containsKey(entry.getKey()) == requireInteraction)
-                .sorted(Comparator
-                        .comparingDouble((Map.Entry<Long, Double> entry) -> entry.getValue())
-                        .reversed()
-                        .thenComparing(Map.Entry::getKey))
-                .limit(limit)
-                .map(entry -> new ScoredEvent(entry.getKey(), entry.getValue()))
-                .toList();
+    @Transactional(readOnly = true)
+    public boolean hasViewedEvent(long userId, long eventId) {
+        return userInteractions.existsByUserIdAndEventIdAndViewedTrue(userId, eventId);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean hasAnyInteraction(long userId, long eventId) {
+        return userInteractions.existsByUserIdAndEventId(userId, eventId);
+    }
+
+    private long opposite(EventSimilarity similarity, long eventId) {
+        return similarity.getEventA() == eventId ? similarity.getEventB() : similarity.getEventA();
+    }
+
+    private long oppositeFromSet(EventSimilarity similarity, Set<Long> seeds) {
+        return seeds.contains(similarity.getEventA()) ? similarity.getEventB() : similarity.getEventA();
+    }
+
+    private Comparator<ScoredEvent> scoreComparator() {
+        return Comparator.comparingDouble(ScoredEvent::score)
+                .reversed()
+                .thenComparingLong(ScoredEvent::eventId);
+    }
+
+    private double round(double value) {
+        return BigDecimal.valueOf(value).setScale(3, RoundingMode.HALF_UP).doubleValue();
     }
 }

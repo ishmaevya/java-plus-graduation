@@ -6,11 +6,13 @@ import java.util.Map;
 import net.devh.boot.grpc.server.service.GrpcService;
 import ru.practicum.ewm.stats.proto.HasUserInteractionRequestProto;
 import ru.practicum.ewm.stats.proto.HasUserInteractionResponseProto;
+import ru.practicum.ewm.stats.proto.HasUserViewedEventRequestProto;
+import ru.practicum.ewm.stats.proto.HasUserViewedEventResponseProto;
 import ru.practicum.ewm.stats.proto.InteractionsCountRequestProto;
 import ru.practicum.ewm.stats.proto.RecommendationsControllerGrpc;
 import ru.practicum.ewm.stats.proto.RecommendedEventProto;
 import ru.practicum.ewm.stats.proto.SimilarEventsRequestProto;
-import ru.practicum.ewm.stats.proto.UserRecommendationsRequestProto;
+import ru.practicum.ewm.stats.proto.UserPredictionsRequestProto;
 
 @GrpcService
 public class RecommendationsController extends RecommendationsControllerGrpc.RecommendationsControllerImplBase {
@@ -22,7 +24,7 @@ public class RecommendationsController extends RecommendationsControllerGrpc.Rec
     }
 
     @Override
-    public void getRecommendationsForUser(UserRecommendationsRequestProto request,
+    public void getRecommendationsForUser(UserPredictionsRequestProto request,
                                           StreamObserver<RecommendedEventProto> responseObserver) {
         List<ScoredEvent> recommendations = analyzerState.getRecommendations(
                 request.getUserId(), request.getMaxResults());
@@ -60,7 +62,16 @@ public class RecommendationsController extends RecommendationsControllerGrpc.Rec
     public void hasUserInteraction(HasUserInteractionRequestProto request,
                                    StreamObserver<HasUserInteractionResponseProto> responseObserver) {
         responseObserver.onNext(HasUserInteractionResponseProto.newBuilder()
-                .setInteracted(analyzerState.hasLike(request.getUserId(), request.getEventId()))
+                .setInteracted(analyzerState.hasAnyInteraction(request.getUserId(), request.getEventId()))
+                .build());
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void hasUserViewedEvent(HasUserViewedEventRequestProto request,
+                                   StreamObserver<HasUserViewedEventResponseProto> responseObserver) {
+        responseObserver.onNext(HasUserViewedEventResponseProto.newBuilder()
+                .setViewed(analyzerState.hasViewedEvent(request.getUserId(), request.getEventId()))
                 .build());
         responseObserver.onCompleted();
     }

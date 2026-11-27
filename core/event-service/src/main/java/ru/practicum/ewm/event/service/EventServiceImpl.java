@@ -34,6 +34,7 @@ import ru.practicum.ewm.event.repository.EventRepository;
 import ru.practicum.ewm.event.repository.EventSpecification;
 import ru.practicum.ewm.stats.grpc.ActionType;
 import ru.practicum.ewm.stats.grpc.RecommendationsClient;
+import ru.practicum.ewm.stats.grpc.RecommendedEvent;
 import ru.practicum.ewm.stats.grpc.UserActionClient;
 
 import java.time.Instant;
@@ -267,6 +268,52 @@ public class EventServiceImpl implements EventService {
         }
         return toFullDto(event, getCategory(event.getCategoryId()),
                 toShort(userClient.getById(event.getInitiatorId())));
+    }
+
+    @Override
+    public List<EventShortDto> getRecommendations(Long userId, Integer maxResults) {
+        if (userId == null) {
+            throw new ValidationException("X-EWM-UserId header is required");
+        }
+        if (maxResults == null || maxResults <= 0) {
+            throw new ValidationException("maxResults must be positive");
+        }
+
+        List<RecommendedEvent> recommended = recommendationsClient.getRecommendations(userId, maxResults);
+        if (recommended.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, Event> events = eventRepository.findByIdIn(recommended.stream()
+                        .map(RecommendedEvent::eventId)
+                        .toList()).stream()
+                .filter(event -> event.getState() == EventState.PUBLISHED)
+                .collect(Collectors.toMap(Event::getId, Function.identity()));
+        List<Event> ordered = new ArrayList<>();
+        for (RecommendedEvent event : recommended) {
+            Event found = events.get(event.eventId());
+            if (found != null) {
+                ordered.add(found);
+            }
+        }
+        return toShortDtos(ordered);
+    }
+
+    @Override
+    public void like(Long userId, Long eventId) {
+        if (userId == null) {
+            throw new ValidationException("X-EWM-UserId header is required");
+        }
+        eventRepository.findByIdAndState(eventId, EventState.PUBLISHED)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
+        if (!recommendationsClient.hasUserViewedEvent(userId, eventId)) {
+            throw new ConflictException("User has not viewed this event");
+        }
+        try {
+            userActionClient.collect(userId, eventId, ActionType.LIKE, Instant.now());
+        } catch (Exception e) {
+            log.warn("Failed to collect like action: {}", e.getMessage());
+        }
     }
 
     @Override
