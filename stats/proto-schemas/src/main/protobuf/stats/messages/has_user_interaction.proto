@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package stats.message;
+
+option java_package = "ru.practicum.ewm.stats.proto";
+option java_multiple_files = true;
+option java_outer_classname = "HasUserInteractionOuterClass";
+
+message HasUserInteractionRequestProto {
+    int64 user_id = 1;
+    int64 event_id = 2;
+}
+
+message HasUserInteractionResponseProto {
+    bool interacted = 1;
+}
+
+message HasUserViewedEventRequestProto {
+    int64 user_id = 1;
+    int64 event_id = 2;
+}
+
+message HasUserViewedEventResponseProto {
+    bool viewed = 1;
+}

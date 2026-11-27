@@ -81,10 +81,9 @@ class EventPrivateControllerTest {
                 .requestModeration(true)
                 .state("PUBLISHED")
                 .title("Concert")
-                .views(0L)
                 .likes(0L)
                 .dislikes(0L)
-                .rating(0L)
+                .rating(0.0)
                 .commentCount(0L)
                 .build();
     }

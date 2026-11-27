@@ -20,6 +20,7 @@ import ru.practicum.ewm.request.mapper.RequestMapper;
 import ru.practicum.ewm.request.model.ParticipationRequest;
 import ru.practicum.ewm.request.model.RequestStatus;
 import ru.practicum.ewm.request.repository.ParticipationRequestRepository;
+import ru.practicum.ewm.stats.grpc.UserActionClient;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -42,6 +43,9 @@ class RequestServiceImplTest {
 
     @Mock
     private EventClient eventClient;
+
+    @Mock
+    private UserActionClient userActionClient;
 
     @Spy
     private RequestMapper mapper = new RequestMapper();

@@ -1,0 +1,48 @@
+server:
+  port: ${SERVER_PORT:9095}
+
+spring:
+  application:
+    name: analyzer
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.LongDeserializer
+      value-deserializer: ru.practicum.kafka.deserializer.UserActionDeserializer
+    listener:
+      ack-mode: manual
+  datasource:
+    url: ${DATASOURCE_URL:jdbc:postgresql://localhost:5432/ewm_analyzer}
+    username: ${DATASOURCE_USERNAME:postgres}
+    password: ${DATASOURCE_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+  sql:
+    init:
+      mode: always
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+grpc:
+  server:
+    port: 0
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    metadata-map:
+      gRPC_port: 0
+
+analyzer:
+  consumer:
+    actions-group-id: ${KAFKA_ANALYZER_ACTIONS_GROUP_ID:ewm-analyzer-actions}
+    similarity-group-id: ${KAFKA_ANALYZER_SIMILARITY_GROUP_ID:ewm-analyzer-similarity}
+  topic:
+    user-actions: ${KAFKA_USER_ACTIONS_TOPIC:stats.user-actions.v1}
+    event-similarity: ${KAFKA_EVENT_SIMILARITY_TOPIC:stats.events-similarity.v1}

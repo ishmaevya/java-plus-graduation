@@ -4,6 +4,17 @@ server:
 stats-server:
   id: stats-server
 
+grpc:
+  client:
+    collector:
+      address: discovery:///collector
+      negotiation-type: plaintext
+      keep-alive: true
+    analyzer:
+      address: discovery:///analyzer
+      negotiation-type: plaintext
+      keep-alive: true
+
 spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/ewm_event}

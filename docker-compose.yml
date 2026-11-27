@@ -9,6 +9,42 @@ x-java-healthcheck: &java-healthcheck
   start_period: 1200s
 
 services:
+  kafka:
+    image: confluentinc/confluent-local:7.4.3
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-cluster cluster-id --bootstrap-server kafka:29092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  kafka-init:
+    image: confluentinc/confluent-local:7.4.3
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists
+      --topic stats.user-actions.v1 --partitions 1 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists
+      --topic stats.events-similarity.v1 --partitions 1 --replication-factor 1
+    restart: "no"
+
   stats-db:
     image: postgres:16.1
     container_name: stats-db
@@ -93,6 +129,65 @@ services:
         condition: service_healthy
       stats-db:
         condition: service_healthy
+    healthcheck: *java-healthcheck
+
+  collector:
+    build:
+      context: .
+      dockerfile: stats/collector/Dockerfile
+    image: ewm-collector
+    container_name: collector
+    environment:
+      <<: *app-env
+      SERVER_PORT: "9093"
+      GRPC_PORT: "9091"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck: *java-healthcheck
+
+  aggregator:
+    build:
+      context: .
+      dockerfile: stats/aggregator/Dockerfile
+    image: ewm-aggregator
+    container_name: aggregator
+    environment:
+      <<: *app-env
+      SERVER_PORT: "9094"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck: *java-healthcheck
+
+  analyzer:
+    build:
+      context: .
+      dockerfile: stats/analyzer/Dockerfile
+    image: ewm-analyzer
+    container_name: analyzer
+    environment:
+      <<: *app-env
+      SERVER_PORT: "9095"
+      GRPC_PORT: "9096"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck: *java-healthcheck
 
   gateway-server:

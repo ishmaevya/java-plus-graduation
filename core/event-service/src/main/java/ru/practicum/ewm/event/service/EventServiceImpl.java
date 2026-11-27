@@ -32,9 +32,12 @@ import ru.practicum.ewm.event.model.Event;
 import ru.practicum.ewm.event.model.EventState;
 import ru.practicum.ewm.event.repository.EventRepository;
 import ru.practicum.ewm.event.repository.EventSpecification;
-import ru.practicum.ewm.stats.clients.StatsClient;
-import ru.practicum.ewm.stats.dto.StatHitResponseElement;
+import ru.practicum.ewm.stats.grpc.ActionType;
+import ru.practicum.ewm.stats.grpc.RecommendationsClient;
+import ru.practicum.ewm.stats.grpc.RecommendedEvent;
+import ru.practicum.ewm.stats.grpc.UserActionClient;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -66,7 +69,8 @@ public class EventServiceImpl implements EventService {
     private final RatingClient ratingClient;
     private final CommentClient commentClient;
     private final SubscriptionClient subscriptionClient;
-    private final StatsClient statsClient;
+    private final RecommendationsClient recommendationsClient;
+    private final UserActionClient userActionClient;
 
     private TransactionRunner transactionRunner = new TransactionRunner();
 
@@ -252,11 +256,64 @@ public class EventServiceImpl implements EventService {
     }
 
     @Override
-    public EventFullDto getPublishedById(Long id) {
+    public EventFullDto getPublishedById(Long id, Long userId) {
         Event event = eventRepository.findByIdAndState(id, EventState.PUBLISHED)
                 .orElseThrow(() -> new EventNotFoundException(id));
+        if (userId != null) {
+            try {
+                userActionClient.collect(userId, id, ActionType.VIEW, Instant.now());
+            } catch (Exception e) {
+                log.warn("Failed to collect view action: {}", e.getMessage());
+            }
+        }
         return toFullDto(event, getCategory(event.getCategoryId()),
                 toShort(userClient.getById(event.getInitiatorId())));
+    }
+
+    @Override
+    public List<EventShortDto> getRecommendations(Long userId, Integer maxResults) {
+        if (userId == null) {
+            throw new ValidationException("X-EWM-UserId header is required");
+        }
+        if (maxResults == null || maxResults <= 0) {
+            throw new ValidationException("maxResults must be positive");
+        }
+
+        List<RecommendedEvent> recommended = recommendationsClient.getRecommendations(userId, maxResults);
+        if (recommended.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, Event> events = eventRepository.findByIdIn(recommended.stream()
+                        .map(RecommendedEvent::eventId)
+                        .toList()).stream()
+                .filter(event -> event.getState() == EventState.PUBLISHED)
+                .collect(Collectors.toMap(Event::getId, Function.identity()));
+        List<Event> ordered = new ArrayList<>();
+        for (RecommendedEvent event : recommended) {
+            Event found = events.get(event.eventId());
+            if (found != null) {
+                ordered.add(found);
+            }
+        }
+        return toShortDtos(ordered);
+    }
+
+    @Override
+    public void like(Long userId, Long eventId) {
+        if (userId == null) {
+            throw new ValidationException("X-EWM-UserId header is required");
+        }
+        eventRepository.findByIdAndState(eventId, EventState.PUBLISHED)
+                .orElseThrow(() -> new EventNotFoundException(eventId));
+        if (!recommendationsClient.hasUserViewedEvent(userId, eventId)) {
+            throw new ConflictException("User has not viewed this event");
+        }
+        try {
+            userActionClient.collect(userId, eventId, ActionType.LIKE, Instant.now());
+        } catch (Exception e) {
+            log.warn("Failed to collect like action: {}", e.getMessage());
+        }
     }
 
     @Override
@@ -296,9 +353,9 @@ public class EventServiceImpl implements EventService {
         if (commentsSort) {
             events.sort(Comparator.comparingLong(EventShortDto::getCommentCount).reversed());
         } else if (ratingSort) {
-            events.sort(Comparator.comparingLong(EventShortDto::getRating).reversed());
+            events.sort(Comparator.comparingDouble(EventShortDto::getRating).reversed());
         } else if ("VIEWS".equals(sort)) {
-            events.sort(Comparator.comparingLong(EventShortDto::getViews));
+            events.sort(Comparator.comparingLong(EventShortDto::getId).reversed());
         }
     }
 
@@ -307,8 +364,8 @@ public class EventServiceImpl implements EventService {
         Map<Long, CategoryDto> categories = getCategories(events);
         Map<Long, UserShortDto> users = getUsers(events);
         Map<Long, RatingStatsDto> ratings = getRatings(ids);
+        Map<Long, Double> analyzerRatings = getAnalyzerRatings(ids);
         Map<Long, Long> commentCounts = getCommentCounts(ids);
-        Map<Long, Long> views = getViews(ids);
         Map<Long, Long> confirmed = getConfirmed(ids);
 
         List<EventShortDto> result = new ArrayList<>();
@@ -322,9 +379,9 @@ public class EventServiceImpl implements EventService {
                     event,
                     category,
                     initiator,
-                    views.getOrDefault(event.getId(), 0L),
                     confirmed.getOrDefault(event.getId(), 0L),
                     rating,
+                    analyzerRatings.getOrDefault(event.getId(), 0.0),
                     commentCounts.getOrDefault(event.getId(), 0L)
             ));
         }
@@ -339,8 +396,8 @@ public class EventServiceImpl implements EventService {
                                           Map<Long, UserShortDto> users) {
         List<Long> ids = events.stream().map(Event::getId).toList();
         Map<Long, RatingStatsDto> ratings = getRatings(ids);
+        Map<Long, Double> analyzerRatings = getAnalyzerRatings(ids);
         Map<Long, Long> commentCounts = getCommentCounts(ids);
-        Map<Long, Long> views = getViews(ids);
         Map<Long, Long> confirmed = getConfirmed(ids);
 
         List<EventFullDto> result = new ArrayList<>();
@@ -354,9 +411,9 @@ public class EventServiceImpl implements EventService {
                     event,
                     category,
                     initiator,
-                    views.getOrDefault(event.getId(), 0L),
                     confirmed.getOrDefault(event.getId(), 0L),
                     rating,
+                    analyzerRatings.getOrDefault(event.getId(), 0.0),
                     commentCounts.getOrDefault(event.getId(), 0L)
             ));
         }
@@ -447,36 +504,17 @@ public class EventServiceImpl implements EventService {
         }
     }
 
-    private Map<Long, Long> getViews(List<Long> eventIds) {
-        Map<Long, Long> views = zeroCounts(eventIds);
+    private Map<Long, Double> getAnalyzerRatings(List<Long> eventIds) {
         if (eventIds.isEmpty()) {
-            return views;
+            return Map.of();
         }
         try {
-            List<String> uris = eventIds.stream().map(id -> "/events/" + id).toList();
-            var stats = statsClient.getStats(
-                    LocalDateTime.of(2020, 1, 1, 0, 0),
-                    LocalDateTime.now(),
-                    uris,
-                    true
-            );
-            if (stats == null) {
-                return views;
-            }
-            for (StatHitResponseElement element : stats) {
-                String uri = element.getUri();
-                if (uri == null || !uri.startsWith("/events/")) {
-                    continue;
-                }
-                String id = uri.substring("/events/".length());
-                if (!id.isEmpty() && id.chars().allMatch(Character::isDigit)) {
-                    views.put(Long.valueOf(id), element.getHits() == null ? 0L : element.getHits());
-                }
-            }
+            Map<Long, Double> ratings = recommendationsClient.getInteractionsCount(eventIds);
+            return ratings == null ? Map.of() : ratings;
         } catch (Exception e) {
-            log.warn("Failed to get views: {}", e.getMessage());
+            log.warn("Failed to get analyzer ratings: {}", e.getMessage());
+            return Map.of();
         }
-        return views;
     }
 
     private Map<Long, Long> getConfirmed(List<Long> eventIds) {

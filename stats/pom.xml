@@ -16,6 +16,11 @@
         <module>stats-client</module>
         <module>stats-server</module>
         <module>stats-dto</module>
+        <module>proto-schemas</module>
+        <module>avro-schemas</module>
+        <module>collector</module>
+        <module>aggregator</module>
+        <module>analyzer</module>
     </modules>
 
     <properties>
